@@ -38,6 +38,34 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      '@google-cloud/logging-winston':
+        specifier: ^6.0.0
+        version: 6.0.0(encoding@0.1.13)(winston@3.12.0)
+      multer:
+        specifier: ^2.0.2
+        version: 2.0.2
+      multer-azure-blob-storage:
+        specifier: ^1.2.0
+        version: 1.2.0
+      multer-cloud-storage:
+        specifier: ^4.0.0
+        version: 4.0.0(encoding@0.1.13)
+      multer-s3:
+        specifier: ^3.0.1
+        version: 3.0.1(@aws-sdk/client-s3@3.844.0)
+      s3-streamlogger:
+        specifier: ^1.11.0
+        version: 1.11.0
+      turndown:
+        specifier: ^7.2.0
+        version: 7.2.0
+      winston-azure-blob:
+        specifier: ^1.5.0
+        version: 1.5.0(async@3.2.5)(winston@3.12.0)
+      winston-daily-rotate-file:
+        specifier: ^5.0.0
+        version: 5.0.0(winston@3.12.0)
     devDependencies:
       '@babel/preset-env':
         specifier: ^7.19.4
@@ -353,6 +381,9 @@ importers:
       '@google-ai/generativelanguage':
         specifier: ^2.5.0
         version: 2.6.0(encoding@0.1.13)
+      '@google-cloud/logging-winston':
+        specifier: ^6.0.0
+        version: 6.0.0(encoding@0.1.13)(winston@3.12.0)
       '@google-cloud/storage':
         specifier: ^7.15.2
         version: 7.16.0(encoding@0.1.13)
@@ -662,6 +693,18 @@ importers:
       mongodb:
         specifier: 6.3.0
         version: 6.3.0(@aws-sdk/credential-providers@3.1002.0)(socks@2.8.1)
+      multer:
+        specifier: ^2.0.2
+        version: 2.0.2
+      multer-azure-blob-storage:
+        specifier: ^1.2.0
+        version: 1.2.0
+      multer-cloud-storage:
+        specifier: ^4.0.0
+        version: 4.0.0(encoding@0.1.13)
+      multer-s3:
+        specifier: ^3.0.1
+        version: 3.0.1(@aws-sdk/client-s3@3.844.0)
       mysql2:
         specifier: ^3.11.3
         version: 3.11.4
@@ -719,6 +762,9 @@ importers:
       replicate:
         specifier: ^0.31.1
         version: 0.31.1
+      s3-streamlogger:
+        specifier: ^1.11.0
+        version: 1.11.0
       sanitize-filename:
         specifier: ^1.6.3
         version: 1.6.3
@@ -728,6 +774,9 @@ importers:
       supergateway:
         specifier: 3.0.1
         version: 3.0.1(bufferutil@4.0.8)(utf-8-validate@6.0.4)
+      turndown:
+        specifier: ^7.2.0
+        version: 7.2.0
       typeorm:
         specifier: ^0.3.6
         version: 0.3.20(ioredis@5.3.2)(mongodb@6.3.0(@aws-sdk/credential-providers@3.1002.0)(socks@2.8.1))(mysql2@3.11.4)(pg@8.11.3)(redis@4.6.13)(sqlite3@5.1.7)(ts-node@10.9.2(@swc/core@1.4.6)(@types/node@22.16.3)(typescript@5.5.2))
@@ -743,6 +792,12 @@ importers:
       winston:
         specifier: ^3.9.0
         version: 3.12.0
+      winston-azure-blob:
+        specifier: ^1.5.0
+        version: 1.5.0(async@3.2.5)(winston@3.12.0)
+      winston-daily-rotate-file:
+        specifier: ^5.0.0
+        version: 5.0.0(winston@3.12.0)
       ws:
         specifier: 8.18.3
         version: 8.18.3(bufferutil@4.0.8)(utf-8-validate@6.0.4)
@@ -936,7 +991,7 @@ importers:
         version: 6.11.0
       '@google-cloud/logging-winston':
         specifier: ^6.0.0
-        version: 6.0.0(winston@3.12.0)
+        version: 6.0.0(encoding@0.1.13)(winston@3.12.0)
       '@keyv/redis':
         specifier: ^4.2.0
         version: 4.3.3
@@ -1110,7 +1165,7 @@ importers:
         version: 1.2.0
       multer-cloud-storage:
         specifier: ^4.0.0
-        version: 4.0.0
+        version: 4.0.0(encoding@0.1.13)
       multer-s3:
         specifier: ^3.0.1
         version: 3.0.1(@aws-sdk/client-s3@3.844.0)
@@ -1399,10 +1454,10 @@ importers:
         version: 16.4.5
       flowise-embed:
         specifier: latest
-        version: 3.1.5
+        version: 3.1.6
       flowise-embed-react:
         specifier: latest
-        version: 3.1.5(@types/node@22.16.3)(flowise-embed@3.1.5)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2)
+        version: 3.1.6(@types/node@22.16.3)(flowise-embed@3.1.6)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2)
       flowise-react-json-view:
         specifier: '*'
         version: 1.21.7(@types/react@18.2.65)(encoding@0.1.13)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
@@ -12901,14 +12956,14 @@ packages:
   flatted@3.3.1:
     resolution: {integrity: sha512-X8cqMLLie7KsNUDSdzeN8FYK9rEt4Dt67OsG/DNGnYTSDBG4uFAJFBnUeiV+zCVAvwFy56IjM9sH51jVaEhNxw==}
 
-  flowise-embed-react@3.1.5:
-    resolution: {integrity: sha512-rOjUy5iZdlhyd2/7U3wYdFOQKSFWq+wPJdVTrP5XeFjlGFdpCzM+uzaID3Uw+hHWIqlFYUIT5DeP/6eIvPeBmg==}
+  flowise-embed-react@3.1.6:
+    resolution: {integrity: sha512-Wxs4RMOoqgGplk2LSwMHNAUxz7koSSfYG5A5TSTHQN0G8C+EN7DGG/4onLcc+R8Zk8dpGfX1J74ogUaMdIottA==}
     peerDependencies:
       flowise-embed: '*'
       react: 18.x
 
-  flowise-embed@3.1.5:
-    resolution: {integrity: sha512-A7VJMLhsLVLl4eyRJlQn2Oqm5hQz8DmY+iSPuK5u/MiQ7Jip9W60gFO6NMTTJ8Xm9JbVx0QkajGOCQDW88hpWw==}
+  flowise-embed@3.1.6:
+    resolution: {integrity: sha512-xSrvBDiEvIIzRFsPBgmzG3SdfBeG4wBzdchdMurft5PQcdYO0HfB8cwGhn00fE5JOsdhVZXfJ3Fq6e/DgrW4ag==}
 
   flowise-nim-container-manager@1.0.11:
     resolution: {integrity: sha512-Er/leiIzJZ691kWqXkjCWv29g0G5qWA4juBOcGZ1P5kBLnkKFxbWc5x8JsSPcHuJQIiGNX/dYEzp2ZrOV3YYMg==}
@@ -26436,7 +26491,7 @@ snapshots:
       - encoding
       - supports-color
 
-  '@google-cloud/common@5.0.2':
+  '@google-cloud/common@5.0.2(encoding@0.1.13)':
     dependencies:
       '@google-cloud/projectify': 4.0.0
       '@google-cloud/promisify': 4.1.0
@@ -26451,9 +26506,9 @@ snapshots:
       - encoding
       - supports-color
 
-  '@google-cloud/logging-winston@6.0.0(winston@3.12.0)':
+  '@google-cloud/logging-winston@6.0.0(encoding@0.1.13)(winston@3.12.0)':
     dependencies:
-      '@google-cloud/logging': 11.2.0
+      '@google-cloud/logging': 11.2.0(encoding@0.1.13)
       google-auth-library: 9.15.1(encoding@0.1.13)
       lodash.mapvalues: 4.6.0
       winston: 3.12.0
@@ -26462,9 +26517,9 @@ snapshots:
       - encoding
       - supports-color
 
-  '@google-cloud/logging@11.2.0':
+  '@google-cloud/logging@11.2.0(encoding@0.1.13)':
     dependencies:
-      '@google-cloud/common': 5.0.2
+      '@google-cloud/common': 5.0.2(encoding@0.1.13)
       '@google-cloud/paginator': 5.0.2
       '@google-cloud/projectify': 4.0.0
       '@google-cloud/promisify': 4.1.0
@@ -36866,10 +36921,10 @@ snapshots:
 
   flatted@3.3.1: {}
 
-  flowise-embed-react@3.1.5(@types/node@22.16.3)(flowise-embed@3.1.5)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2):
+  flowise-embed-react@3.1.6(@types/node@22.16.3)(flowise-embed@3.1.6)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2):
     dependencies:
       '@ladle/react': 2.5.1(@types/node@22.16.3)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2)
-      flowise-embed: 3.1.5
+      flowise-embed: 3.1.6
       react: 18.2.0
     transitivePeerDependencies:
       - '@types/node'
@@ -36883,7 +36938,7 @@ snapshots:
       - terser
       - typescript
 
-  flowise-embed@3.1.5:
+  flowise-embed@3.1.6:
     dependencies:
       '@babel/core': 7.24.0
       '@microsoft/fetch-event-source': 2.0.1
@@ -41368,7 +41423,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  multer-cloud-storage@4.0.0:
+  multer-cloud-storage@4.0.0(encoding@0.1.13):
     dependencies:
       '@google-cloud/storage': 7.16.0(encoding@0.1.13)
       '@types/express': 5.0.1
