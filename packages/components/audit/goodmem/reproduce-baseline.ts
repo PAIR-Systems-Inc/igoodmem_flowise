@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- this harness exists to print an audit report */
 /** Baseline reproduction: drives the SHIPPED GoodMem tools over a mock GoodMem server. */
 import * as fs from 'fs'
 import { startMock, fixture, UNKNOWN_STATUS } from './mockServer'

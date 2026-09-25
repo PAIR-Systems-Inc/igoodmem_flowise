@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- this harness exists to print an audit report */
 /** The same scenarios as reproduce-baseline.ts, driven through the rewrite. */
 import * as fs from 'fs'
 import { mkdtempSync, writeFileSync } from 'fs'

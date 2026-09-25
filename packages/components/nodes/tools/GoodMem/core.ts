@@ -445,7 +445,7 @@ export const DEFAULT_ACTIONS: GoodMemAction[] = [
 /** Actions that can destroy or rename data, and are therefore never on by default. */
 export const DESTRUCTIVE_ACTIONS: GoodMemAction[] = ['updateSpace', 'deleteSpace', 'deleteMemory']
 
-const BUILDERS: Record<GoodMemAction, (c: GoodMemConnection, baseUrl: string) => DynamicStructuredTool> = {
+const BUILDERS: Record<GoodMemAction, (_c: GoodMemConnection, _baseUrl: string) => DynamicStructuredTool> = {
     retrieveMemories: (c, u) => new SearchTool(c, u),
     createMemory: (c, u) => new RememberTool(c, u),
     uploadFile: (c, u) => new UploadFileTool(c, u),
