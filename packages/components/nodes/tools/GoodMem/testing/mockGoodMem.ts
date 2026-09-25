@@ -9,6 +9,22 @@
 
 import * as http from 'http'
 
+/**
+ * The ids this server hands out. GoodMem ids are UUIDs and the node refuses
+ * anything else before a request is made, so the fakes are UUIDs too.
+ */
+export const MOCK_IDS = {
+    space: '0199b8a0-5ace-7000-8000-000000000001',
+    spacePage2: '0199b8a0-5ace-7000-8000-000000000002',
+    spaceCreated: '0199b8a0-5ace-7000-8000-000000000003',
+    memory: '0199b8a0-3e30-7000-8000-000000000001',
+    memoryPage2: '0199b8a0-3e30-7000-8000-000000000002',
+    memoryCreated: '0199b8a0-3e30-7000-8000-000000000003',
+    embedder: '0199b8a0-e3bd-7000-8000-000000000001',
+    otherEmbedder: '0199b8a0-e3bd-7000-8000-000000000002',
+    reranker: '0199b8a0-4e4a-7000-8000-000000000001'
+} as const
+
 export interface MockOptions {
     /** NDJSON body returned by POST /v1/memories:retrieve. */
     retrieveBody?: string
@@ -16,7 +32,7 @@ export interface MockOptions {
     truncateRetrieve?: boolean
     /** Return an empty body (no events at all). */
     emptyRetrieve?: boolean
-    /** Embedder id the pre-existing space "demo-space" was built on. */
+    /** Embedder id the pre-existing space "demo-space" was built on. Defaults to `MOCK_IDS.embedder`. */
     spaceEmbedderId?: string
     /** Bytes served by GET /v1/memories/:id/content. */
     contentBytes?: Buffer
@@ -61,36 +77,36 @@ export async function startMockGoodMem(options: MockOptions = {}): Promise<MockS
             state.requests.push({ method: req.method ?? '', path: raw, body })
 
             if (path === '/v1/embedders') {
-                return json(res, { embedders: [{ embedderId: 'emb-real', displayName: 'MiniLM', providerType: 'OPENAI' }] })
+                return json(res, { embedders: [{ embedderId: MOCK_IDS.embedder, displayName: 'MiniLM', providerType: 'OPENAI' }] })
             }
             if (path === '/v1/rerankers') {
-                return json(res, { rerankers: [{ rerankerId: 'rr-1', displayName: 'Voyage' }] })
+                return json(res, { rerankers: [{ rerankerId: MOCK_IDS.reranker, displayName: 'Voyage' }] })
             }
 
             if (path === '/v1/spaces' && req.method === 'GET') {
                 const first = {
                     spaces: [
                         {
-                            spaceId: 'space-existing',
+                            spaceId: MOCK_IDS.space,
                             name: 'demo-space',
-                            spaceEmbedders: [{ embedderId: options.spaceEmbedderId ?? 'emb-real' }]
+                            spaceEmbedders: [{ embedderId: options.spaceEmbedderId ?? MOCK_IDS.embedder }]
                         }
                     ],
                     ...(options.paginate && !token ? { nextToken: 'SPACES-PAGE-2' } : {})
                 }
-                const second = { spaces: [{ spaceId: 'space-page2', name: 'second-page-space', spaceEmbedders: [] }] }
+                const second = { spaces: [{ spaceId: MOCK_IDS.spacePage2, name: 'second-page-space', spaceEmbedders: [] }] }
                 return json(res, token ? second : first)
             }
             if (path === '/v1/spaces' && req.method === 'POST') {
                 const parsed = JSON.parse(body || '{}')
-                return json(res, { spaceId: 'space-created', name: parsed.name, spaceEmbedders: parsed.spaceEmbedders })
+                return json(res, { spaceId: MOCK_IDS.spaceCreated, name: parsed.name, spaceEmbedders: parsed.spaceEmbedders })
             }
             if (path.startsWith('/v1/spaces/') && path.endsWith('/memories')) {
                 const first = {
-                    memories: [{ memoryId: 'mem-1', spaceId: 'space-existing', contentType: 'text/plain' }],
+                    memories: [{ memoryId: MOCK_IDS.memory, spaceId: MOCK_IDS.space, contentType: 'text/plain' }],
                     ...(options.paginate && !token ? { nextToken: 'MEMS-PAGE-2' } : {})
                 }
-                const second = { memories: [{ memoryId: 'mem-2', spaceId: 'space-existing', contentType: 'text/plain' }] }
+                const second = { memories: [{ memoryId: MOCK_IDS.memoryPage2, spaceId: MOCK_IDS.space, contentType: 'text/plain' }] }
                 return json(res, token ? second : first)
             }
             if (path.startsWith('/v1/spaces/') && req.method === 'PUT') {
@@ -100,7 +116,7 @@ export async function startMockGoodMem(options: MockOptions = {}): Promise<MockS
                     // silent success.
                     return json(res, { code: 3, message: 'publicRead is not a recognized field' }, 400)
                 }
-                return json(res, { spaceId: 'space-existing', name: JSON.parse(body || '{}').name })
+                return json(res, { spaceId: MOCK_IDS.space, name: JSON.parse(body || '{}').name })
             }
             if (path.startsWith('/v1/spaces/') && req.method === 'DELETE') {
                 res.writeHead(204)
@@ -108,7 +124,7 @@ export async function startMockGoodMem(options: MockOptions = {}): Promise<MockS
             }
 
             if (path === '/v1/memories' && req.method === 'POST') {
-                return json(res, { memoryId: 'mem-new', spaceId: 'space-existing', processingStatus: 'PENDING' })
+                return json(res, { memoryId: MOCK_IDS.memoryCreated, spaceId: MOCK_IDS.space, processingStatus: 'PENDING' })
             }
             if (path.endsWith('/content')) {
                 const bytes = options.contentBytes ?? Buffer.from('plain text body', 'utf-8')
@@ -116,7 +132,7 @@ export async function startMockGoodMem(options: MockOptions = {}): Promise<MockS
                 return res.end(bytes)
             }
             if (path.startsWith('/v1/memories/') && req.method === 'GET') {
-                return json(res, { memoryId: 'mem-1', spaceId: 'space-existing', contentType: options.contentType ?? 'text/plain' })
+                return json(res, { memoryId: MOCK_IDS.memory, spaceId: MOCK_IDS.space, contentType: options.contentType ?? 'text/plain' })
             }
             if (path.startsWith('/v1/memories/') && req.method === 'DELETE') {
                 res.writeHead(204)

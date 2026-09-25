@@ -2,6 +2,7 @@ import { z } from 'zod/v3'
 import { DynamicStructuredTool } from '../OpenAPIToolkit/core'
 import { TOOL_ARGS_PREFIX, formatToolError } from '../../../src/agents'
 import { GoodMemConnection, GoodMemConnectionOptions, GoodMemError } from './client'
+import { UUID_PATTERN, uuidRequirement } from './ids'
 import { warningText } from './results'
 
 export const desc = `Use this when you want to interact with GoodMem - a memory layer for AI agents that handles semantic storage and vector retrieval.`
@@ -17,7 +18,15 @@ export const desc = `Use this when you want to interact with GoodMem - a memory 
  *
  * What is left is what the model genuinely decides: the query, the text to
  * remember, which document to read.
+ *
+ * Every id argument is declared as a UUID pattern so the model is told what
+ * an id looks like. That is advice, not the guard: the connection re-checks
+ * each id with `requireUuid` immediately before the request, so a call that
+ * skips schema validation is refused just the same.
  */
+
+/** A model-supplied GoodMem id: a UUID, and the schema says so. */
+const uuidArgument = (field: string) => z.string().regex(UUID_PATTERN, uuidRequirement(field))
 
 const SearchSchema = z.object({
     query: z.string().describe('A natural language question or phrase to find semantically similar memories for.'),
@@ -38,15 +47,19 @@ const ListSpacesSchema = z.object({})
 const ListEmbeddersSchema = z.object({})
 
 const GetSpaceSchema = z.object({
-    space_id: z.string().optional().describe('The UUID of the space to fetch. Defaults to the space configured on the GoodMem node.')
+    space_id: uuidArgument('space_id')
+        .optional()
+        .describe('The UUID of the space to fetch. Defaults to the space configured on the GoodMem node.')
 })
 
 const ListMemoriesSchema = z.object({
-    space_id: z.string().optional().describe('The UUID of the space to list. Defaults to the space configured on the GoodMem node.')
+    space_id: uuidArgument('space_id')
+        .optional()
+        .describe('The UUID of the space to list. Defaults to the space configured on the GoodMem node.')
 })
 
 const GetMemorySchema = z.object({
-    memory_id: z.string().describe('The UUID of the memory to fetch.'),
+    memory_id: uuidArgument('memory_id').describe('The UUID of the memory to fetch.'),
     include_content: z
         .boolean()
         .optional()
@@ -59,16 +72,16 @@ const CreateSpaceSchema = z.object({
 })
 
 const UpdateSpaceSchema = z.object({
-    space_id: z.string().describe('The UUID of the space to update.'),
+    space_id: uuidArgument('space_id').describe('The UUID of the space to update.'),
     name: z.string().describe('The new name for the space.')
 })
 
 const DeleteSpaceSchema = z.object({
-    space_id: z.string().describe('The UUID of the space to delete. This cannot be undone.')
+    space_id: uuidArgument('space_id').describe('The UUID of the space to delete. This cannot be undone.')
 })
 
 const DeleteMemorySchema = z.object({
-    memory_id: z.string().describe('The UUID of the memory to delete. This cannot be undone.')
+    memory_id: uuidArgument('memory_id').describe('The UUID of the memory to delete. This cannot be undone.')
 })
 
 export interface GoodMemFactoryArgs extends GoodMemConnectionOptions {
@@ -252,7 +265,7 @@ class GetSpaceTool extends BaseGoodMemTool {
         try {
             const spaceId = this.connection.requireSpaceId(arg.space_id)
             const spaces = await this.connection.listSpaces()
-            const space = spaces.find((s) => s.spaceId === spaceId)
+            const space = spaces.find((s) => String(s.spaceId ?? '').toLowerCase() === spaceId)
             if (!space) throw new GoodMemError(`No space with id ${JSON.stringify(spaceId)} is visible to this connection.`)
             return this.ok({ space }, { ...arg, space_id: spaceId })
         } catch (err) {
@@ -376,8 +389,8 @@ class DeleteSpaceTool extends BaseGoodMemTool {
 
     async _call(arg: z.infer<typeof DeleteSpaceSchema>): Promise<string> {
         try {
-            await this.connection.deleteSpace(arg.space_id)
-            return this.ok({ spaceId: arg.space_id, deleted: true }, arg)
+            const spaceId = await this.connection.deleteSpace(arg.space_id)
+            return this.ok({ spaceId, deleted: true }, arg)
         } catch (err) {
             return this.fail(err, arg)
         }
@@ -399,8 +412,8 @@ class DeleteMemoryTool extends BaseGoodMemTool {
 
     async _call(arg: z.infer<typeof DeleteMemorySchema>): Promise<string> {
         try {
-            await this.connection.deleteMemory(arg.memory_id)
-            return this.ok({ memoryId: arg.memory_id, deleted: true }, arg)
+            const memoryId = await this.connection.deleteMemory(arg.memory_id)
+            return this.ok({ memoryId, deleted: true }, arg)
         } catch (err) {
             return this.fail(err, arg)
         }

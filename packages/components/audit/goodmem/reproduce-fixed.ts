@@ -10,10 +10,16 @@ import { GoodMemConnection } from '../../nodes/tools/GoodMem/client'
 import { equals } from '../../nodes/tools/GoodMem/filters'
 import { TOOL_ARGS_PREFIX } from '../../src/agents'
 
+// The rewrite refuses any id that is not a UUID before it sends a request,
+// so the ids this harness passes in are UUIDs. The mock's own fake ids
+// ("space-EXISTING", "emb-REAL") are only compared against, never sent.
+const SPACE_ID = '0199b8a0-5ace-7000-8000-000000000001'
+const MEMORY_ID = '0199b8a0-3e30-7000-8000-000000000001'
+const ASKED_EMBEDDER_ID = '0199b8a0-e3bd-7000-8000-000000000002'
+
 const A = (label: string, detail: string) => console.log(`\n### ${label}\n${detail}`)
 const parse = (s: string) => JSON.parse(s.split(TOOL_ARGS_PREFIX)[0])
-const mk = (url: string, extra: any = {}) =>
-    createGoodMemTools({ baseUrl: url, apiKey: 'gm_test', defaultSpaceId: 'space-EXISTING', ...extra })
+const mk = (url: string, extra: any = {}) => createGoodMemTools({ baseUrl: url, apiKey: 'gm_test', defaultSpaceId: SPACE_ID, ...extra })
 const byName = (tools: any[], n: string) => tools.find((t) => t.name === n)!
 
 async function main() {
@@ -99,7 +105,7 @@ async function main() {
     }
     {
         const m = await startMock({ spaceEmbedderId: 'emb-REAL' })
-        const c = new GoodMemConnection({ baseUrl: m.url, apiKey: 'k', defaultEmbedderId: 'emb-ASKED-FOR' })
+        const c = new GoodMemConnection({ baseUrl: m.url, apiKey: 'k', defaultEmbedderId: ASKED_EMBEDDER_ID })
         let outcome: string
         try {
             outcome = JSON.stringify(await c.createSpace('demo-space'))
@@ -108,14 +114,14 @@ async function main() {
         }
         A(
             'P32 unchecked embedder reuse',
-            `  existing space "demo-space" is built on: emb-REAL\n  caller asked for: emb-ASKED-FOR\n  result: ${outcome}`
+            `  existing space "demo-space" is built on: emb-REAL\n  caller asked for: ${ASKED_EMBEDDER_ID}\n  result: ${outcome}`
         )
         await m.close()
     }
     {
         const m = await startMock({})
         const c = new GoodMemConnection({ baseUrl: m.url, apiKey: 'k' })
-        await c.updateSpace('space-EXISTING', { name: 'renamed' })
+        await c.updateSpace(SPACE_ID, { name: 'renamed' })
         const put = m.requests.filter((r) => r.method === 'PUT').pop()!
         A('P2 publicRead on the wire', `  PUT body: ${put.body}   (no publicRead -> no 400)`)
         await m.close()
@@ -126,7 +132,7 @@ async function main() {
         ])
         const m = await startMock({ pdfBytes: bin })
         const t: any = byName(mk(m.url, { actions: [...GOODMEM_ACTIONS] }), 'goodmem_get_memory')
-        const out = parse(await t._call({ memory_id: 'mem-1', include_content: true }))
+        const out = parse(await t._call({ memory_id: MEMORY_ID, include_content: true }))
         const round = Buffer.from(out.contentBase64 ?? '', 'base64')
         A(
             'P16 binary content',

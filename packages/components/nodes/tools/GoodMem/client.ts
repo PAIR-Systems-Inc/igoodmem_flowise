@@ -11,13 +11,17 @@
  *    never dropped and a failure is never reported as an empty index;
  *  - listings are drained through the SDK's auto-paginating `Page`, capped by
  *    `maxListItems`, so a caller never sees a half-answer plus a token;
- *  - a space is reused only when its embedder matches the one requested.
+ *  - a space is reused only when its embedder matches the one requested;
+ *  - every id is checked by `requireUuid` (ids.ts) before the SDK call it
+ *    feeds, so a model-, developer- or config-supplied id that is not a UUID
+ *    never reaches a URL path.
  */
 
 import { Goodmem } from '@pairsystems/goodmem'
 import { readFileSync } from 'fs'
 import { basename } from 'path'
 import { fromMapping } from './filters'
+import { requireUuid } from './ids'
 import { outcomeFromEvents, RetrievalOutcome, warningText } from './results'
 import { resolveUploadPath } from './uploads'
 
@@ -90,6 +94,11 @@ function buildFetch(verifySsl: boolean, baseUrl: string): typeof fetch | undefin
     }) as unknown as typeof fetch
 }
 
+/** A configured id: unset stays unset, anything else must be a UUID. */
+function configuredUuid(value: string | undefined, field: string): string | undefined {
+    return value === undefined || value === null ? undefined : requireUuid(value, field)
+}
+
 /** Turn an SDK error into a message worth showing the caller. */
 export function describeError(error: any, what: string): GoodMemError {
     const status = error?.status ?? error?.statusCode
@@ -117,22 +126,29 @@ export class GoodMemConnection {
             timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
             fetch: buildFetch(verifySsl, options.baseUrl)
         } as any)
-        this.defaultSpaceId = options.defaultSpaceId
-        this.defaultEmbedderId = options.defaultEmbedderId
+        // Configured ids are checked once here so a bad setting fails when the
+        // node is built, not on the agent's first call.
+        this.defaultSpaceId = configuredUuid(options.defaultSpaceId, 'Default Space (defaultSpaceId)')
+        this.defaultEmbedderId = configuredUuid(options.defaultEmbedderId, 'Default Embedder (defaultEmbedderId)')
         this.uploadDir = options.uploadDir
-        this.rerankerId = options.rerankerId
+        this.rerankerId = configuredUuid(options.rerankerId, 'Reranker (rerankerId)')
         this.metadataFilter = options.metadataFilter ?? {}
         this.minScore = options.minScore
         this.maxListItems = options.maxListItems ?? DEFAULT_MAX_LIST_ITEMS
     }
 
-    /** The space a tool call operates on. */
+    /**
+     * The space a call operates on, as a lowercase UUID.
+     *
+     * An explicit id -- including an empty string -- is used as given and must
+     * be a UUID; only an absent one falls back to the Default Space.
+     */
     requireSpaceId(provided?: string): string {
-        const id = provided ?? this.defaultSpaceId
-        if (!id) {
+        if (provided !== undefined && provided !== null) return requireUuid(provided, 'space_id')
+        if (!this.defaultSpaceId) {
             throw new GoodMemError('No GoodMem space configured. Set a Default Space on the GoodMem node.')
         }
-        return id
+        return requireUuid(this.defaultSpaceId, 'Default Space (defaultSpaceId)')
     }
 
     private spaceKeys(spaceIds: string[]): Array<Record<string, unknown>> {
@@ -149,7 +165,7 @@ export class GoodMemConnection {
      * rather than waited out.
      */
     async search(query: string, topK: number, spaceIds?: string[]): Promise<RetrievalOutcome> {
-        const ids = spaceIds && spaceIds.length > 0 ? spaceIds : [this.requireSpaceId()]
+        const ids = spaceIds && spaceIds.length > 0 ? spaceIds.map((id) => requireUuid(id, 'space_id')) : [this.requireSpaceId()]
         const request: Record<string, unknown> = {
             message: query,
             spaceKeys: this.spaceKeys(ids),
@@ -159,7 +175,7 @@ export class GoodMemConnection {
         if (this.rerankerId) {
             request.postProcessor = {
                 name: 'com.goodmem.retrieval.postprocess.ChatPostProcessorFactory',
-                config: { reranker_id: this.rerankerId, max_results: topK }
+                config: { reranker_id: requireUuid(this.rerankerId, 'Reranker (rerankerId)'), max_results: topK }
             }
         }
         let outcome: RetrievalOutcome
@@ -191,9 +207,10 @@ export class GoodMemConnection {
 
     /** Store a piece of text as a memory. */
     async remember(text: string, spaceId?: string, metadata?: Record<string, unknown>): Promise<Record<string, any>> {
+        const target = this.requireSpaceId(spaceId)
         try {
             const created: any = await this.client.memories.create({
-                spaceId: this.requireSpaceId(spaceId),
+                spaceId: target,
                 originalContent: text,
                 contentType: 'text/plain',
                 ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {})
@@ -211,11 +228,12 @@ export class GoodMemConnection {
      * refused before a byte is read.
      */
     async uploadFile(name: string, spaceId?: string, metadata?: Record<string, unknown>): Promise<Record<string, any>> {
+        const target = this.requireSpaceId(spaceId)
         const resolved = resolveUploadPath(name, this.uploadDir)
         try {
             const created: any = await (this.client.memories as any).createFromPath({
                 path: resolved,
-                spaceId: this.requireSpaceId(spaceId),
+                spaceId: target,
                 ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {})
             })
             return {
@@ -281,16 +299,17 @@ export class GoodMemConnection {
      * intact rather than force-decoded into replacement characters.
      */
     async getMemory(memoryId: string, includeContent = false): Promise<Record<string, any>> {
+        const id = requireUuid(memoryId, 'memory_id')
         let memory: any
         try {
-            memory = await this.client.memories.get(memoryId)
+            memory = await this.client.memories.get(id)
         } catch (error: any) {
-            throw describeError(error, `Fetching memory ${JSON.stringify(memoryId)}`)
+            throw describeError(error, `Fetching memory ${JSON.stringify(id)}`)
         }
         const result: Record<string, any> = { memory }
         if (!includeContent) return result
         try {
-            const bytes: Uint8Array = await this.client.memories.content(memoryId)
+            const bytes: Uint8Array = await this.client.memories.content(id)
             const buffer = Buffer.from(bytes)
             const contentType = String(memory?.contentType ?? '')
             if (contentType.startsWith('text/') || contentType.includes('json') || contentType.includes('xml')) {
@@ -317,10 +336,13 @@ export class GoodMemConnection {
      * that the caller's later searches cannot find.
      */
     async createSpace(name: string, embedderId?: string): Promise<Record<string, any>> {
-        const wanted = embedderId ?? this.defaultEmbedderId
-        if (!wanted) {
+        const explicit = embedderId !== undefined && embedderId !== null
+        if (!explicit && !this.defaultEmbedderId) {
             throw new GoodMemError('No embedder configured. Set a Default Embedder on the GoodMem node to create spaces.')
         }
+        const wanted = explicit
+            ? requireUuid(embedderId, 'embedder_id')
+            : requireUuid(this.defaultEmbedderId, 'Default Embedder (defaultEmbedderId)')
         const existing = (await this.listSpaces()).filter((s) => s?.name === name)
         if (existing.length > 1) {
             throw new GoodMemError(`${existing.length} spaces are named ${JSON.stringify(name)}; pass an explicit space id instead.`)
@@ -328,7 +350,7 @@ export class GoodMemConnection {
         if (existing.length === 1) {
             const space = existing[0]
             const embedders: string[] = (space.spaceEmbedders ?? []).map((e: any) => String(e?.embedderId ?? e))
-            if (!embedders.includes(wanted)) {
+            if (!embedders.some((e) => e.toLowerCase() === wanted)) {
                 throw new GoodMemError(
                     `Space ${JSON.stringify(name)} already exists but is built on embedder(s) ${embedders.join(', ') || '(none)'}, ` +
                         `not ${wanted}. A space's embedder cannot be changed; use a different name or the matching embedder.`
@@ -352,33 +374,40 @@ export class GoodMemConnection {
         spaceId: string,
         changes: { name?: string; replaceLabels?: Record<string, string>; mergeLabels?: Record<string, string> }
     ): Promise<Record<string, any>> {
+        const id = requireUuid(spaceId, 'space_id')
         const body: Record<string, unknown> = {}
         if (changes.name !== undefined) body.name = changes.name
         if (changes.replaceLabels !== undefined) body.replaceLabels = changes.replaceLabels
         if (changes.mergeLabels !== undefined) body.mergeLabels = changes.mergeLabels
         if (Object.keys(body).length === 0) throw new GoodMemError('Nothing to update: provide a name or labels.')
         try {
-            const updated: any = await this.client.spaces.update(spaceId, body as any)
-            return { spaceId: updated?.spaceId ?? spaceId, name: updated?.name }
+            const updated: any = await this.client.spaces.update(id, body as any)
+            return { spaceId: updated?.spaceId ?? id, name: updated?.name }
         } catch (error: any) {
-            throw describeError(error, `Updating space ${JSON.stringify(spaceId)}`)
+            throw describeError(error, `Updating space ${JSON.stringify(id)}`)
         }
     }
 
-    async deleteSpace(spaceId: string): Promise<void> {
+    /** Delete a space and everything in it. Returns the id that was deleted. */
+    async deleteSpace(spaceId: string): Promise<string> {
+        const id = requireUuid(spaceId, 'space_id')
         try {
-            await this.client.spaces.delete(spaceId)
+            await this.client.spaces.delete(id)
         } catch (error: any) {
-            throw describeError(error, `Deleting space ${JSON.stringify(spaceId)}`)
+            throw describeError(error, `Deleting space ${JSON.stringify(id)}`)
         }
+        return id
     }
 
-    async deleteMemory(memoryId: string): Promise<void> {
+    /** Delete one memory. Returns the id that was deleted. */
+    async deleteMemory(memoryId: string): Promise<string> {
+        const id = requireUuid(memoryId, 'memory_id')
         try {
-            await this.client.memories.delete(memoryId)
+            await this.client.memories.delete(id)
         } catch (error: any) {
-            throw describeError(error, `Deleting memory ${JSON.stringify(memoryId)}`)
+            throw describeError(error, `Deleting memory ${JSON.stringify(id)}`)
         }
+        return id
     }
 
     /** Read a file from the upload directory without sending it anywhere. Used by tests. */

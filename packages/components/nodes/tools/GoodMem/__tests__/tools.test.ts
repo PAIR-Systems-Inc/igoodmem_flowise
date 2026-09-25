@@ -10,9 +10,9 @@ import { TOOL_ARGS_PREFIX } from '../../../../src/agents'
 import { GoodMemConnection } from '../client'
 import { createGoodMemTools, DEFAULT_ACTIONS, DESTRUCTIVE_ACTIONS, GOODMEM_ACTIONS } from '../core'
 import { GoodMemUploadError, resolveUploadPath } from '../uploads'
-import { MockServer, startMockGoodMem } from '../testing/mockGoodMem'
+import { MOCK_IDS, MockServer, startMockGoodMem } from '../testing/mockGoodMem'
 
-const base = { baseUrl: 'http://127.0.0.1:1', apiKey: 'gm_test', defaultSpaceId: 'space-existing' }
+const base = { baseUrl: 'http://127.0.0.1:1', apiKey: 'gm_test', defaultSpaceId: MOCK_IDS.space }
 const names = (tools: any[]) => tools.map((t) => t.name)
 
 describe('model-facing tool surface', () => {
@@ -122,7 +122,7 @@ describe('Flowise tool result contract', () => {
 
         const raw = await tool._call({ text: 'a fact worth keeping' })
         const [payload, args] = raw.split(TOOL_ARGS_PREFIX)
-        expect(JSON.parse(payload).memoryId).toBe('mem-new')
+        expect(JSON.parse(payload).memoryId).toBe(MOCK_IDS.memoryCreated)
         expect(JSON.parse(args)).toEqual({ text: 'a fact worth keeping' })
     })
 

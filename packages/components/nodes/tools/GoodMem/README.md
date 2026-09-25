@@ -6,7 +6,7 @@ than by keyword.
 
 Status: **node version 2.0**, built on the official
 [`@pairsystems/goodmem`](https://www.npmjs.com/package/@pairsystems/goodmem)
-SDK (`^0.1.7`). 56 offline tests and 7 live tests; see
+SDK (`^0.1.7`). 94 offline tests and 7 live tests; see
 [Developing](#developing). Version 2.0 changes the tools an agent sees —
 read [Upgrading from 1.0](#upgrading-from-10) before updating a saved
 chatflow.
@@ -41,6 +41,12 @@ and nothing destructive.
 | `goodmem_delete_memory`  | `memory_id`                    | no — destructive               |
 
 Use these names when you write a system prompt or an allow-list.
+
+Every id — `memory_id`, `space_id`, and the Default Space, Default Embedder
+and Reranker settings — must be a UUID, and anything else is refused before a
+request is sent: ids are placed in the request URL, so a value such as `..` or
+`../spaces/<id>` could otherwise address a different resource than the one
+named.
 
 Anything that changes _what a search means_ — the reranker, the metadata
 filter, the score threshold, the upload directory — is node configuration,
@@ -124,7 +130,7 @@ Delete and rename tools are no longer exposed unless you select them, and
 Run from `packages/components`:
 
 ```bash
-npx jest nodes/tools/GoodMem          # 56 offline tests
+npx jest nodes/tools/GoodMem          # 94 offline tests
 npx tsc --noEmit -p tsconfig.json     # typecheck
 npx eslint "nodes/tools/GoodMem/**/*.ts"
 ```

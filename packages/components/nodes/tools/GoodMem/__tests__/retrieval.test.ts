@@ -10,7 +10,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { GoodMemConnection } from '../client'
 import { MALFORMED_STREAM_CODE, UNKNOWN_CODE, classifyStatus, orientScore } from '../results'
-import { MockServer, startMockGoodMem } from '../testing/mockGoodMem'
+import { MOCK_IDS, MockServer, startMockGoodMem } from '../testing/mockGoodMem'
 
 const fixture = (name: string) => readFileSync(join(__dirname, '..', 'testing', 'fixtures', name), 'utf-8')
 
@@ -22,7 +22,7 @@ const UNKNOWN_STATUS = fixture('retrieve_unknown_status.ndjson')
 let server: MockServer
 
 const connect = (extra: Record<string, unknown> = {}) =>
-    new GoodMemConnection({ baseUrl: server.baseUrl, apiKey: 'gm_test', defaultSpaceId: 'space-existing', ...extra })
+    new GoodMemConnection({ baseUrl: server.baseUrl, apiKey: 'gm_test', defaultSpaceId: MOCK_IDS.space, ...extra })
 
 afterEach(async () => {
     if (server) await server.close()
@@ -115,7 +115,7 @@ describe('score semantics', () => {
 
     it('never negates a reranker score, which would invert the ranking', async () => {
         server = await startMockGoodMem({ retrieveBody: OK })
-        const outcome = await connect({ rerankerId: 'rr-1' }).search('anything', 5)
+        const outcome = await connect({ rerankerId: MOCK_IDS.reranker }).search('anything', 5)
         const hit = outcome.hits[0]
 
         expect(hit.scoreKind).toBe('reranker')
