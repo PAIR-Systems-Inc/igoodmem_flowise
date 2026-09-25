@@ -512,6 +512,9 @@ importers:
       '@opentelemetry/semantic-conventions':
         specifier: 1.27.0
         version: 1.27.0
+      '@pairsystems/goodmem':
+        specifier: ^0.1.7
+        version: 0.1.7
       '@pinecone-database/pinecone':
         specifier: 4.0.0
         version: 4.0.0
@@ -1399,10 +1402,10 @@ importers:
         version: 16.4.5
       flowise-embed:
         specifier: latest
-        version: 3.1.5
+        version: 3.1.6
       flowise-embed-react:
         specifier: latest
-        version: 3.1.5(@types/node@22.16.3)(flowise-embed@3.1.5)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2)
+        version: 3.1.6(@types/node@22.16.3)(flowise-embed@3.1.6)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2)
       flowise-react-json-view:
         specifier: '*'
         version: 1.21.7(@types/react@18.2.65)(encoding@0.1.13)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
@@ -7106,6 +7109,10 @@ packages:
     engines: {node: '>=14'}
     peerDependencies:
       '@opentelemetry/api': ^1.1.0
+
+  '@pairsystems/goodmem@0.1.7':
+    resolution: {integrity: sha512-DHQNTFeQlpmUUh6qHogyFOBvaK5baY1g2lq94hBhgEcOG80WvpUv/vCzoE9foCtI9iKL2HMR6yqveVWQ/iLNqw==}
+    engines: {node: '>=20'}
 
   '@paralleldrive/cuid2@2.2.2':
     resolution: {integrity: sha512-ZOBkgDwEdoYVlSeRbYYXs0S9MejQofiVYoTbKzy/6GQa39/q5tQU2IX46+shYnUkpEl3wc+J6wRlar7r2EK2xA==}
@@ -12901,14 +12908,14 @@ packages:
   flatted@3.3.1:
     resolution: {integrity: sha512-X8cqMLLie7KsNUDSdzeN8FYK9rEt4Dt67OsG/DNGnYTSDBG4uFAJFBnUeiV+zCVAvwFy56IjM9sH51jVaEhNxw==}
 
-  flowise-embed-react@3.1.5:
-    resolution: {integrity: sha512-rOjUy5iZdlhyd2/7U3wYdFOQKSFWq+wPJdVTrP5XeFjlGFdpCzM+uzaID3Uw+hHWIqlFYUIT5DeP/6eIvPeBmg==}
+  flowise-embed-react@3.1.6:
+    resolution: {integrity: sha512-Wxs4RMOoqgGplk2LSwMHNAUxz7koSSfYG5A5TSTHQN0G8C+EN7DGG/4onLcc+R8Zk8dpGfX1J74ogUaMdIottA==}
     peerDependencies:
       flowise-embed: '*'
       react: 18.x
 
-  flowise-embed@3.1.5:
-    resolution: {integrity: sha512-A7VJMLhsLVLl4eyRJlQn2Oqm5hQz8DmY+iSPuK5u/MiQ7Jip9W60gFO6NMTTJ8Xm9JbVx0QkajGOCQDW88hpWw==}
+  flowise-embed@3.1.6:
+    resolution: {integrity: sha512-xSrvBDiEvIIzRFsPBgmzG3SdfBeG4wBzdchdMurft5PQcdYO0HfB8cwGhn00fE5JOsdhVZXfJ3Fq6e/DgrW4ag==}
 
   flowise-nim-container-manager@1.0.11:
     resolution: {integrity: sha512-Er/leiIzJZ691kWqXkjCWv29g0G5qWA4juBOcGZ1P5kBLnkKFxbWc5x8JsSPcHuJQIiGNX/dYEzp2ZrOV3YYMg==}
@@ -29441,6 +29448,8 @@ snapshots:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/core': 1.27.0(@opentelemetry/api@1.9.0)
 
+  '@pairsystems/goodmem@0.1.7': {}
+
   '@paralleldrive/cuid2@2.2.2':
     dependencies:
       '@noble/hashes': 1.8.0
@@ -36866,10 +36875,10 @@ snapshots:
 
   flatted@3.3.1: {}
 
-  flowise-embed-react@3.1.5(@types/node@22.16.3)(flowise-embed@3.1.5)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2):
+  flowise-embed-react@3.1.6(@types/node@22.16.3)(flowise-embed@3.1.6)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2):
     dependencies:
       '@ladle/react': 2.5.1(@types/node@22.16.3)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)(sass@1.71.1)(terser@5.29.1)(typescript@5.5.2)
-      flowise-embed: 3.1.5
+      flowise-embed: 3.1.6
       react: 18.2.0
     transitivePeerDependencies:
       - '@types/node'
@@ -36883,7 +36892,7 @@ snapshots:
       - terser
       - typescript
 
-  flowise-embed@3.1.5:
+  flowise-embed@3.1.6:
     dependencies:
       '@babel/core': 7.24.0
       '@microsoft/fetch-event-source': 2.0.1

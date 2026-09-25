@@ -1,497 +1,388 @@
-import * as fs from 'fs'
-import * as path from 'path'
-import * as https from 'https'
-import fetch, { RequestInit, Response } from 'node-fetch'
-
 /**
- * Low-level HTTP client for communicating with the GoodMem API.
+ * GoodMem connection for the Flowise node.
  *
- * Mirrors the behavior of the official langgraph-goodmem `_client.py` so
- * agent prompts written against any GoodMem integration produce the same
- * request/response shapes here.
+ * This is a thin layer over the official `@pairsystems/goodmem` SDK, not a
+ * second HTTP client: the SDK owns transport, retries, pagination, streaming
+ * and typed errors, and this file owns the decisions that are specific to
+ * driving GoodMem from a Flowise chatflow.
+ *
+ * Three rules are enforced here rather than left to each tool:
+ *  - a retrieval is folded through `results.ts`, so server status events are
+ *    never dropped and a failure is never reported as an empty index;
+ *  - listings are drained through the SDK's auto-paginating `Page`, capped by
+ *    `maxListItems`, so a caller never sees a half-answer plus a token;
+ *  - a space is reused only when its embedder matches the one requested.
  */
 
-export interface GoodMemClientOptions {
-    baseUrl: string
-    apiKey: string
-    timeoutMs?: number
-    verifySsl?: boolean
-}
+import { Goodmem } from '@pairsystems/goodmem'
+import { readFileSync } from 'fs'
+import { basename } from 'path'
+import { fromMapping } from './filters'
+import { outcomeFromEvents, RetrievalOutcome, warningText } from './results'
+import { resolveUploadPath } from './uploads'
 
-export interface CreateSpaceArgs {
-    name: string
-    embedder_id: string
-    chunking_strategy?: string
-    chunk_size?: number
-    chunk_overlap?: number
-}
+export const DEFAULT_TIMEOUT_MS = 30_000
+export const DEFAULT_MAX_LIST_ITEMS = 200
 
-export interface UpdateSpaceArgs {
-    space_id: string
-    name?: string
-    public_read?: boolean
-    replace_labels?: Record<string, string>
-    merge_labels?: Record<string, string>
-}
-
-export interface CreateMemoryArgs {
-    space_id: string
-    text_content?: string
-    file_path?: string
-    metadata?: Record<string, any>
-}
-
-export interface RetrieveMemoriesArgs {
-    query: string
-    space_ids: string
-    max_results?: number
-    include_memory_definition?: boolean
-    wait_for_indexing?: boolean
-    reranker_id?: string
-    llm_id?: string
-    relevance_threshold?: number
-    llm_temperature?: number
-    chronological_resort?: boolean
-}
-
-export interface ListMemoriesArgs {
-    space_id: string
-    max_results?: number
-    next_token?: string
-    status_filter?: string
-    include_content?: boolean
-    filter_expression?: string
-}
-
-const CHAT_POSTPROCESSOR = 'com.goodmem.retrieval.postprocess.ChatPostProcessorFactory'
-const DEFAULT_TIMEOUT_MS = 30_000
-
-const MIME_BY_EXT: Record<string, string> = {
-    '.pdf': 'application/pdf',
-    '.txt': 'text/plain',
-    '.md': 'text/markdown',
-    '.csv': 'text/csv',
-    '.html': 'text/html',
-    '.htm': 'text/html',
-    '.json': 'application/json',
-    '.xml': 'application/xml',
-    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.doc': 'application/msword',
-    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.xls': 'application/vnd.ms-excel',
-    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    '.ppt': 'application/vnd.ms-powerpoint',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.bmp': 'image/bmp',
-    '.tiff': 'image/tiff',
-    '.tif': 'image/tiff',
-    '.webp': 'image/webp'
-}
-
-function guessMimeType(filePath: string): string {
-    const ext = path.extname(filePath).toLowerCase()
-    return MIME_BY_EXT[ext] || 'application/octet-stream'
-}
-
-async function readErrorBody(response: Response): Promise<string> {
-    try {
-        const text = await response.text()
-        return text || response.statusText
-    } catch (_) {
-        return response.statusText
-    }
-}
-
+/** Raised for GoodMem problems this node detects itself. */
 export class GoodMemError extends Error {
     status?: number
-    body?: string
-    constructor(message: string, status?: number, body?: string) {
+    constructor(message: string, status?: number) {
         super(message)
         this.name = 'GoodMemError'
         this.status = status
-        this.body = body
     }
 }
 
-export class GoodMemClient {
-    private baseUrl: string
-    private apiKey: string
-    private timeoutMs: number
-    private agent?: https.Agent
+export interface GoodMemConnectionOptions {
+    baseUrl: string
+    apiKey: string
+    /** Verify the server's TLS certificate. Defaults to true. */
+    verifySsl?: boolean
+    timeoutMs?: number
+    /** Space the tools operate on when the chatflow does not name one. */
+    defaultSpaceId?: string
+    /** Embedder used when a space has to be created. */
+    defaultEmbedderId?: string
+    /** Directory model-supplied upload paths are confined to. */
+    uploadDir?: string
+    /** Reranker applied to every search, chosen by the developer. */
+    rerankerId?: string
+    /** Developer-set metadata filter applied server-side to every search. */
+    metadataFilter?: Record<string, unknown>
+    /** Drop hits below this score. Only meaningful with a reranker. */
+    minScore?: number
+    maxListItems?: number
+}
 
-    constructor(options: GoodMemClientOptions) {
-        if (!options.baseUrl) {
-            throw new GoodMemError('GoodMem base URL is required')
+/**
+ * Build the fetch the SDK will use.
+ *
+ * TLS verification stays on unless the credential explicitly turns it off,
+ * and turning it off applies only to this connection -- it never mutates
+ * `NODE_TLS_REJECT_UNAUTHORIZED`, which would silently disable verification
+ * for every other node in the Flowise process.
+ */
+function buildFetch(verifySsl: boolean, baseUrl: string): typeof fetch | undefined {
+    if (verifySsl) return undefined
+    let Agent: any
+    try {
+        // Loaded only on the opt-out path so the default path needs nothing.
+        Agent = require('undici').Agent
+    } catch {
+        throw new GoodMemError(
+            'Verify SSL was turned off, but the undici agent needed to do that is not available in this Flowise install. ' +
+                'Re-enable Verify SSL, or install a certificate the server trusts.'
+        )
+    }
+    const dispatcher = new Agent({ connect: { rejectUnauthorized: false } })
+    let warned = false
+    return ((input: any, init?: any) => {
+        if (!warned) {
+            warned = true
+            // eslint-disable-next-line no-console
+            console.warn(
+                `[GoodMem] TLS certificate verification is DISABLED for ${baseUrl}. ` +
+                    'This is intended for a self-signed local server only; traffic to this host can be intercepted.'
+            )
         }
-        if (!options.apiKey) {
-            throw new GoodMemError('GoodMem API key is required')
-        }
-        this.baseUrl = options.baseUrl.replace(/\/+$/, '')
-        this.apiKey = options.apiKey
-        this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
-        // Only build a custom agent when we need to disable TLS verification
-        // and the target is https. node-fetch only honours the agent for the
-        // matching protocol, so the default behaviour stays correct for http.
-        if (options.verifySsl === false) {
-            this.agent = new https.Agent({ rejectUnauthorized: false })
-        }
+        return (globalThis as any).fetch(input, { ...(init ?? {}), dispatcher })
+    }) as unknown as typeof fetch
+}
+
+/** Turn an SDK error into a message worth showing the caller. */
+export function describeError(error: any, what: string): GoodMemError {
+    const status = error?.status ?? error?.statusCode
+    const detail = error?.body?.message ?? error?.message ?? String(error)
+    return new GoodMemError(`${what} failed${status ? ` (HTTP ${status})` : ''}: ${detail}`, status)
+}
+
+export class GoodMemConnection {
+    readonly client: Goodmem
+    readonly defaultSpaceId?: string
+    readonly defaultEmbedderId?: string
+    readonly uploadDir?: string
+    readonly rerankerId?: string
+    readonly metadataFilter: Record<string, unknown>
+    readonly minScore?: number
+    readonly maxListItems: number
+
+    constructor(options: GoodMemConnectionOptions) {
+        if (!options.baseUrl) throw new GoodMemError('GoodMem base URL is required.')
+        if (!options.apiKey) throw new GoodMemError('GoodMem API key is required.')
+        const verifySsl = options.verifySsl !== false
+        this.client = new Goodmem({
+            baseUrl: options.baseUrl.replace(/\/+$/, ''),
+            apiKey: options.apiKey,
+            timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            fetch: buildFetch(verifySsl, options.baseUrl)
+        } as any)
+        this.defaultSpaceId = options.defaultSpaceId
+        this.defaultEmbedderId = options.defaultEmbedderId
+        this.uploadDir = options.uploadDir
+        this.rerankerId = options.rerankerId
+        this.metadataFilter = options.metadataFilter ?? {}
+        this.minScore = options.minScore
+        this.maxListItems = options.maxListItems ?? DEFAULT_MAX_LIST_ITEMS
     }
 
-    private headers(contentType = 'application/json', accept = 'application/json'): Record<string, string> {
-        return {
-            'X-API-Key': this.apiKey,
-            'Content-Type': contentType,
-            Accept: accept
+    /** The space a tool call operates on. */
+    requireSpaceId(provided?: string): string {
+        const id = provided ?? this.defaultSpaceId
+        if (!id) {
+            throw new GoodMemError('No GoodMem space configured. Set a Default Space on the GoodMem node.')
         }
+        return id
     }
 
-    private url(p: string): string {
-        return `${this.baseUrl}${p}`
+    private spaceKeys(spaceIds: string[]): Array<Record<string, unknown>> {
+        const expression = fromMapping(this.metadataFilter)
+        return spaceIds.map((spaceId) => (expression ? { spaceId, filter: expression } : { spaceId }))
     }
 
-    private async request(p: string, init: RequestInit): Promise<Response> {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), this.timeoutMs)
+    /**
+     * Semantic search.
+     *
+     * Returns whatever the server produced together with the statuses it
+     * reported. There is no polling: an empty result is reported immediately
+     * as an empty result, and a *failed* retrieval is reported as a failure
+     * rather than waited out.
+     */
+    async search(query: string, topK: number, spaceIds?: string[]): Promise<RetrievalOutcome> {
+        const ids = spaceIds && spaceIds.length > 0 ? spaceIds : [this.requireSpaceId()]
+        const request: Record<string, unknown> = {
+            message: query,
+            spaceKeys: this.spaceKeys(ids),
+            requestedSize: topK,
+            fetchMemory: true
+        }
+        if (this.rerankerId) {
+            request.postProcessor = {
+                name: 'com.goodmem.retrieval.postprocess.ChatPostProcessorFactory',
+                config: { reranker_id: this.rerankerId, max_results: topK }
+            }
+        }
+        let outcome: RetrievalOutcome
         try {
-            const response = await fetch(this.url(p), {
-                ...init,
-                agent: this.agent,
-                signal: controller.signal as any
-            })
-            if (!response.ok) {
-                const body = await readErrorBody(response)
-                throw new GoodMemError(
-                    `GoodMem API ${init.method ?? 'GET'} ${p} failed: ${response.status} ${response.statusText} - ${body}`,
-                    response.status,
-                    body
+            outcome = await outcomeFromEvents(this.client.memories.retrieve(request as any), Boolean(this.rerankerId))
+        } catch (error: any) {
+            throw describeError(error, 'GoodMem retrieval')
+        }
+
+        if (this.minScore !== undefined) {
+            const kept = outcome.hits.filter((h) => h.score !== null && h.score >= (this.minScore as number))
+            if (outcome.hits.length > 0 && kept.length === 0) {
+                const scores = outcome.hits.map((h) => h.score).filter((s): s is number => s !== null)
+                // eslint-disable-next-line no-console
+                console.warn(
+                    `[GoodMem] Minimum Score ${this.minScore} removed all ${outcome.hits.length} result(s); observed scores ranged ` +
+                        `${Math.min(...scores).toFixed(4)}..${Math.max(...scores).toFixed(4)}. Vector scores are oriented distances ` +
+                        'and reranker scales are provider-dependent -- neither is a 0-1 range.'
                 )
             }
-            return response
-        } catch (err: any) {
-            if (err instanceof GoodMemError) throw err
-            if (err?.name === 'AbortError') {
-                throw new GoodMemError(`GoodMem API ${init.method ?? 'GET'} ${p} timed out after ${this.timeoutMs}ms`)
-            }
-            throw new GoodMemError(`GoodMem API ${init.method ?? 'GET'} ${p} request failed: ${err?.message ?? err}`)
-        } finally {
-            clearTimeout(timer)
+            outcome.hits = kept
         }
+        if (outcome.partial) {
+            // eslint-disable-next-line no-console
+            console.warn(`[GoodMem] ${warningText(outcome.statuses)}`)
+        }
+        return outcome
     }
 
-    // -- Space operations --
-
-    async createSpace(args: CreateSpaceArgs): Promise<Record<string, any>> {
-        const chunkingStrategy = args.chunking_strategy ?? 'recursive'
-        const chunkSize = args.chunk_size ?? 512
-        const chunkOverlap = args.chunk_overlap ?? 50
-
-        // Mirror the reference behavior: dedupe by name before creating.
+    /** Store a piece of text as a memory. */
+    async remember(text: string, spaceId?: string, metadata?: Record<string, unknown>): Promise<Record<string, any>> {
         try {
-            const spaces = await this.listSpaces()
-            for (const space of spaces) {
-                if (space?.name === args.name) {
-                    return {
-                        success: true,
-                        spaceId: space.spaceId,
-                        name: space.name,
-                        embedderId: args.embedder_id,
-                        message: 'Space already exists, reusing existing space',
-                        reused: true
-                    }
-                }
-            }
-        } catch (_) {
-            // If listing fails, proceed to create
+            const created: any = await this.client.memories.create({
+                spaceId: this.requireSpaceId(spaceId),
+                originalContent: text,
+                contentType: 'text/plain',
+                ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {})
+            } as any)
+            return { memoryId: created?.memoryId, spaceId: created?.spaceId, processingStatus: created?.processingStatus ?? 'PENDING' }
+        } catch (error: any) {
+            throw describeError(error, 'Creating a memory')
         }
+    }
 
-        const chunkingConfig: Record<string, any> =
-            chunkingStrategy === 'none'
-                ? { none: {} }
-                : { [chunkingStrategy]: { chunkSize, chunkOverlap } }
-
-        const response = await this.request('/v1/spaces', {
-            method: 'POST',
-            headers: this.headers(),
-            body: JSON.stringify({
-                name: args.name,
-                spaceEmbedders: [{ embedderId: args.embedder_id }],
-                defaultChunkingConfig: chunkingConfig
+    /**
+     * Upload a file from the configured upload directory.
+     *
+     * `name` is resolved inside that directory; anything outside it is
+     * refused before a byte is read.
+     */
+    async uploadFile(name: string, spaceId?: string, metadata?: Record<string, unknown>): Promise<Record<string, any>> {
+        const resolved = resolveUploadPath(name, this.uploadDir)
+        try {
+            const created: any = await (this.client.memories as any).createFromPath({
+                path: resolved,
+                spaceId: this.requireSpaceId(spaceId),
+                ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {})
             })
-        })
-        const body = (await response.json()) as Record<string, any>
-        return {
-            success: true,
-            spaceId: body.spaceId,
-            name: body.name,
-            embedderId: args.embedder_id,
-            message: 'Space created successfully',
-            reused: false
+            return {
+                memoryId: created?.memoryId,
+                spaceId: created?.spaceId,
+                fileName: basename(resolved),
+                processingStatus: created?.processingStatus ?? 'PENDING'
+            }
+        } catch (error: any) {
+            throw describeError(error, `Uploading ${JSON.stringify(basename(resolved))}`)
         }
     }
 
+    /** Every space the key can see, following pagination internally. */
     async listSpaces(): Promise<Record<string, any>[]> {
-        const response = await this.request('/v1/spaces', { method: 'GET', headers: this.headers() })
-        const body = (await response.json()) as any
-        if (Array.isArray(body)) return body
-        return body?.spaces ?? []
-    }
-
-    async getSpace(spaceId: string): Promise<Record<string, any>> {
-        const response = await this.request(`/v1/spaces/${encodeURIComponent(spaceId)}`, {
-            method: 'GET',
-            headers: this.headers()
-        })
-        return (await response.json()) as Record<string, any>
-    }
-
-    async updateSpace(args: UpdateSpaceArgs): Promise<Record<string, any>> {
-        const body: Record<string, any> = {}
-        if (args.name !== undefined) body.name = args.name
-        if (args.public_read !== undefined) body.publicRead = args.public_read
-        if (args.replace_labels !== undefined) body.replaceLabels = args.replace_labels
-        if (args.merge_labels !== undefined) body.mergeLabels = args.merge_labels
-
-        const response = await this.request(`/v1/spaces/${encodeURIComponent(args.space_id)}`, {
-            method: 'PUT',
-            headers: this.headers(),
-            body: JSON.stringify(body)
-        })
-        return (await response.json()) as Record<string, any>
-    }
-
-    async deleteSpace(spaceId: string): Promise<Record<string, any>> {
-        await this.request(`/v1/spaces/${encodeURIComponent(spaceId)}`, {
-            method: 'DELETE',
-            headers: this.headers()
-        })
-        return {
-            success: true,
-            spaceId,
-            message: 'Space deleted successfully'
+        try {
+            const out: Record<string, any>[] = []
+            for await (const space of (await this.client.spaces.list({} as any)) as any) {
+                out.push(space)
+                if (out.length >= this.maxListItems) break
+            }
+            return out
+        } catch (error: any) {
+            throw describeError(error, 'Listing spaces')
         }
     }
 
-    // -- Memory operations --
-
-    async createMemory(args: CreateMemoryArgs): Promise<Record<string, any>> {
-        const requestBody: Record<string, any> = { spaceId: args.space_id }
-
-        if (args.file_path) {
-            const filePath = args.file_path
-            if (!fs.existsSync(filePath)) {
-                throw new GoodMemError(`File not found: ${filePath}`)
+    /** Every embedder registered on the server. */
+    async listEmbedders(): Promise<Record<string, any>[]> {
+        try {
+            const listed: any = await this.client.embedders.list({} as any)
+            const out: Record<string, any>[] = []
+            for await (const embedder of listed) {
+                out.push(embedder)
+                if (out.length >= this.maxListItems) break
             }
-            const mimeType = guessMimeType(filePath)
-            const fileBytes = fs.readFileSync(filePath)
-            requestBody.contentType = mimeType
-            if (mimeType.startsWith('text/')) {
-                requestBody.originalContent = fileBytes.toString('utf-8')
+            return out
+        } catch (error: any) {
+            throw describeError(error, 'Listing embedders')
+        }
+    }
+
+    /** Memories in a space, following pagination internally. */
+    async listMemories(spaceId?: string): Promise<Record<string, any>[]> {
+        const target = this.requireSpaceId(spaceId)
+        try {
+            const out: Record<string, any>[] = []
+            for await (const memory of (await this.client.memories.list(target, {} as any)) as any) {
+                out.push(memory)
+                if (out.length >= this.maxListItems) break
+            }
+            return out
+        } catch (error: any) {
+            throw describeError(error, 'Listing memories')
+        }
+    }
+
+    /**
+     * One memory, optionally with its stored content.
+     *
+     * Content is fetched as bytes and only decoded when the memory's own
+     * content type says it is text. A PDF is returned base64-encoded and
+     * intact rather than force-decoded into replacement characters.
+     */
+    async getMemory(memoryId: string, includeContent = false): Promise<Record<string, any>> {
+        let memory: any
+        try {
+            memory = await this.client.memories.get(memoryId)
+        } catch (error: any) {
+            throw describeError(error, `Fetching memory ${JSON.stringify(memoryId)}`)
+        }
+        const result: Record<string, any> = { memory }
+        if (!includeContent) return result
+        try {
+            const bytes: Uint8Array = await this.client.memories.content(memoryId)
+            const buffer = Buffer.from(bytes)
+            const contentType = String(memory?.contentType ?? '')
+            if (contentType.startsWith('text/') || contentType.includes('json') || contentType.includes('xml')) {
+                result.content = buffer.toString('utf-8')
+                result.contentEncoding = 'utf-8'
             } else {
-                requestBody.originalContentB64 = fileBytes.toString('base64')
+                result.contentBase64 = buffer.toString('base64')
+                result.contentEncoding = 'base64'
             }
-        } else if (args.text_content !== undefined && args.text_content !== null) {
-            requestBody.contentType = 'text/plain'
-            requestBody.originalContent = args.text_content
-        } else {
-            throw new GoodMemError('No content provided. Provide either text_content or file_path.')
+            result.contentType = contentType
+            result.contentBytes = buffer.length
+        } catch (error: any) {
+            result.contentError = describeError(error, 'Fetching memory content').message
         }
-
-        if (args.metadata) {
-            requestBody.metadata = args.metadata
-        }
-
-        const response = await this.request('/v1/memories', {
-            method: 'POST',
-            headers: this.headers(),
-            body: JSON.stringify(requestBody)
-        })
-        const body = (await response.json()) as Record<string, any>
-        return {
-            success: true,
-            memoryId: body.memoryId,
-            spaceId: body.spaceId,
-            status: body.processingStatus ?? 'PENDING',
-            contentType: requestBody.contentType,
-            message: 'Memory created successfully'
-        }
-    }
-
-    async getMemory(memoryId: string, includeContent = true): Promise<Record<string, any>> {
-        const response = await this.request(`/v1/memories/${encodeURIComponent(memoryId)}`, {
-            method: 'GET',
-            headers: this.headers()
-        })
-        const memory = (await response.json()) as Record<string, any>
-        const result: Record<string, any> = { success: true, memory }
-
-        if (includeContent) {
-            try {
-                const contentResponse = await this.request(`/v1/memories/${encodeURIComponent(memoryId)}/content`, {
-                    method: 'GET',
-                    headers: this.headers()
-                })
-                const contentType = contentResponse.headers.get('content-type') ?? ''
-                if (contentType.includes('application/json')) {
-                    result.content = await contentResponse.json()
-                } else {
-                    result.content = await contentResponse.text()
-                }
-            } catch (err: any) {
-                result.contentError = `Failed to fetch content: ${err?.message ?? err}`
-            }
-        }
-
         return result
     }
 
-    async listMemories(args: ListMemoriesArgs): Promise<Record<string, any>> {
-        const params = new URLSearchParams()
-        if (args.max_results !== undefined && args.max_results !== null) params.append('maxResults', String(args.max_results))
-        if (args.next_token) params.append('nextToken', args.next_token)
-        if (args.status_filter) params.append('statusFilter', args.status_filter)
-        if (args.include_content) params.append('includeContent', 'true')
-        if (args.filter_expression) params.append('filter', args.filter_expression)
-
-        const query = params.toString()
-        const path = `/v1/spaces/${encodeURIComponent(args.space_id)}/memories${query ? `?${query}` : ''}`
-        const response = await this.request(path, { method: 'GET', headers: this.headers() })
-        const body = (await response.json()) as any
-        const memories = Array.isArray(body?.memories) ? body.memories : []
-        return {
-            success: true,
-            spaceId: args.space_id,
-            memories,
-            totalMemories: memories.length,
-            nextToken: body?.nextToken ?? null
+    /**
+     * Create a space, or reuse one of the same name.
+     *
+     * Reuse requires the existing space to carry the requested embedder. A
+     * space built on a different embedder is a different search index, so
+     * reusing it while reporting the requested embedder would write documents
+     * that the caller's later searches cannot find.
+     */
+    async createSpace(name: string, embedderId?: string): Promise<Record<string, any>> {
+        const wanted = embedderId ?? this.defaultEmbedderId
+        if (!wanted) {
+            throw new GoodMemError('No embedder configured. Set a Default Embedder on the GoodMem node to create spaces.')
+        }
+        const existing = (await this.listSpaces()).filter((s) => s?.name === name)
+        if (existing.length > 1) {
+            throw new GoodMemError(`${existing.length} spaces are named ${JSON.stringify(name)}; pass an explicit space id instead.`)
+        }
+        if (existing.length === 1) {
+            const space = existing[0]
+            const embedders: string[] = (space.spaceEmbedders ?? []).map((e: any) => String(e?.embedderId ?? e))
+            if (!embedders.includes(wanted)) {
+                throw new GoodMemError(
+                    `Space ${JSON.stringify(name)} already exists but is built on embedder(s) ${embedders.join(', ') || '(none)'}, ` +
+                        `not ${wanted}. A space's embedder cannot be changed; use a different name or the matching embedder.`
+                )
+            }
+            return { spaceId: space.spaceId, name: space.name, embedderId: wanted, reused: true }
+        }
+        try {
+            const created: any = await this.client.spaces.create({
+                name,
+                spaceEmbedders: [{ embedderId: wanted }]
+            } as any)
+            return { spaceId: created?.spaceId, name: created?.name ?? name, embedderId: wanted, reused: false }
+        } catch (error: any) {
+            throw describeError(error, `Creating space ${JSON.stringify(name)}`)
         }
     }
 
-    async deleteMemory(memoryId: string): Promise<Record<string, any>> {
-        await this.request(`/v1/memories/${encodeURIComponent(memoryId)}`, {
-            method: 'DELETE',
-            headers: this.headers()
-        })
-        return {
-            success: true,
-            memoryId,
-            message: 'Memory deleted successfully'
+    /** Rename a space or change its labels. `publicRead` is not settable: the server rejects it. */
+    async updateSpace(
+        spaceId: string,
+        changes: { name?: string; replaceLabels?: Record<string, string>; mergeLabels?: Record<string, string> }
+    ): Promise<Record<string, any>> {
+        const body: Record<string, unknown> = {}
+        if (changes.name !== undefined) body.name = changes.name
+        if (changes.replaceLabels !== undefined) body.replaceLabels = changes.replaceLabels
+        if (changes.mergeLabels !== undefined) body.mergeLabels = changes.mergeLabels
+        if (Object.keys(body).length === 0) throw new GoodMemError('Nothing to update: provide a name or labels.')
+        try {
+            const updated: any = await this.client.spaces.update(spaceId, body as any)
+            return { spaceId: updated?.spaceId ?? spaceId, name: updated?.name }
+        } catch (error: any) {
+            throw describeError(error, `Updating space ${JSON.stringify(spaceId)}`)
         }
     }
 
-    async retrieveMemories(args: RetrieveMemoriesArgs): Promise<Record<string, any>> {
-        const spaceKeys = args.space_ids
-            .split(',')
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0)
-            .map((spaceId) => ({ spaceId }))
-        if (spaceKeys.length === 0) {
-            throw new GoodMemError('At least one valid Space ID is required.')
-        }
-
-        const maxResults = args.max_results ?? 5
-        const requestBody: Record<string, any> = {
-            message: args.query,
-            spaceKeys,
-            requestedSize: maxResults,
-            fetchMemory: args.include_memory_definition ?? true
-        }
-
-        const postConfig: Record<string, any> = {}
-        if (args.reranker_id !== undefined && args.reranker_id !== null) postConfig.reranker_id = args.reranker_id
-        if (args.llm_id !== undefined && args.llm_id !== null) postConfig.llm_id = args.llm_id
-        if (args.relevance_threshold !== undefined && args.relevance_threshold !== null)
-            postConfig.relevance_threshold = args.relevance_threshold
-        if (args.llm_temperature !== undefined && args.llm_temperature !== null) postConfig.llm_temp = args.llm_temperature
-        if (args.chronological_resort !== undefined && args.chronological_resort !== null)
-            postConfig.chronological_resort = args.chronological_resort
-        if (Object.keys(postConfig).length > 0) {
-            if (postConfig.max_results === undefined) postConfig.max_results = maxResults
-            requestBody.postProcessor = { name: CHAT_POSTPROCESSOR, config: postConfig }
-        }
-
-        const waitForIndexing = args.wait_for_indexing ?? true
-        const maxWaitMs = 60_000
-        const pollIntervalMs = 5_000
-        const start = Date.now()
-        let lastResult: Record<string, any> | null = null
-
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const response = await this.request('/v1/memories:retrieve', {
-                method: 'POST',
-                headers: this.headers('application/json', 'application/x-ndjson'),
-                body: JSON.stringify(requestBody)
-            })
-            const responseText = await response.text()
-
-            const results: Record<string, any>[] = []
-            const memories: Record<string, any>[] = []
-            let resultSetId = ''
-            let abstractReply: Record<string, any> | null = null
-
-            for (const rawLine of responseText.split('\n')) {
-                let line = rawLine.trim()
-                if (!line) continue
-                if (line.startsWith('data:')) line = line.slice(5).trim()
-                if (!line || line.startsWith('event:')) continue
-                try {
-                    const item = JSON.parse(line)
-                    if (item.resultSetBoundary) {
-                        resultSetId = item.resultSetBoundary.resultSetId ?? ''
-                    } else if (item.memoryDefinition) {
-                        memories.push(item.memoryDefinition)
-                    } else if (item.abstractReply) {
-                        abstractReply = item.abstractReply
-                    } else if (item.retrievedItem) {
-                        const ri = item.retrievedItem
-                        const chunkData = ri.chunk ?? {}
-                        const chunk = chunkData.chunk ?? {}
-                        results.push({
-                            chunkId: chunk.chunkId,
-                            chunkText: chunk.chunkText,
-                            memoryId: chunk.memoryId,
-                            relevanceScore: chunkData.relevanceScore,
-                            memoryIndex: chunkData.memoryIndex
-                        })
-                    }
-                } catch (_) {
-                    continue
-                }
-            }
-
-            lastResult = {
-                success: true,
-                resultSetId,
-                results,
-                memories,
-                totalResults: results.length,
-                query: args.query
-            }
-            if (abstractReply !== null) {
-                lastResult.abstractReply = abstractReply
-            }
-
-            if (results.length > 0 || !waitForIndexing) {
-                return lastResult
-            }
-
-            const elapsed = Date.now() - start
-            if (elapsed >= maxWaitMs) {
-                lastResult.message = 'No results found after waiting 60 seconds for indexing. Memories may still be processing.'
-                return lastResult
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+    async deleteSpace(spaceId: string): Promise<void> {
+        try {
+            await this.client.spaces.delete(spaceId)
+        } catch (error: any) {
+            throw describeError(error, `Deleting space ${JSON.stringify(spaceId)}`)
         }
     }
 
-    async listEmbedders(): Promise<Record<string, any>[]> {
-        const response = await this.request('/v1/embedders', { method: 'GET', headers: this.headers() })
-        const body = (await response.json()) as any
-        if (Array.isArray(body)) return body
-        return body?.embedders ?? []
+    async deleteMemory(memoryId: string): Promise<void> {
+        try {
+            await this.client.memories.delete(memoryId)
+        } catch (error: any) {
+            throw describeError(error, `Deleting memory ${JSON.stringify(memoryId)}`)
+        }
+    }
+
+    /** Read a file from the upload directory without sending it anywhere. Used by tests. */
+    readConfinedFile(name: string): Buffer {
+        return readFileSync(resolveUploadPath(name, this.uploadDir))
     }
 }
