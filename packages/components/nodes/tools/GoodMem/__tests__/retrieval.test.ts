@@ -9,7 +9,7 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { GoodMemConnection } from '../client'
-import { MALFORMED_STREAM_CODE, UNKNOWN_CODE, classifyStatus, orientScore } from '../results'
+import { MALFORMED_STREAM_CODE, UNKNOWN_CODE, classifyStatus, orientScore, rerankerFailed } from '../results'
 import { MOCK_IDS, MockServer, startMockGoodMem } from '../testing/mockGoodMem'
 
 const fixture = (name: string) => readFileSync(join(__dirname, '..', 'testing', 'fixtures', name), 'utf-8')
@@ -135,6 +135,63 @@ describe('score semantics', () => {
         } finally {
             warn.mockRestore()
         }
+    })
+})
+
+describe('reranker fallback (Q4a)', () => {
+    it('labels and orients fallback hits as vector when the requested reranker failed', async () => {
+        server = await startMockGoodMem({ retrieveBody: DEGRADED_HITS })
+        const outcome = await connect({ rerankerId: 'e2b7a63e-8f2a-4e3b-9c7a-2d1e0f9a8b7c' }).search('anything', 5)
+
+        // The server sent NOT_FOUND (naming the reranker) + RERANKING_FAILED
+        // and still returned its vector fallback hit (rawScore -0.5845...).
+        expect(outcome.reranked).toBe(false)
+        expect(outcome.partial).toBe(true)
+        const hit = outcome.hits[0]
+        expect(hit.scoreKind).toBe('vector')
+        expect(hit.score).toBeCloseTo(0.5845972299575806, 10)
+        expect(hit.rawScore).toBeCloseTo(-0.5845972299575806, 10)
+    })
+
+    it('does not apply a reranker-tuned Minimum Score to fallback hits', async () => {
+        server = await startMockGoodMem({ retrieveBody: DEGRADED_HITS })
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+        try {
+            const outcome = await connect({
+                rerankerId: 'e2b7a63e-8f2a-4e3b-9c7a-2d1e0f9a8b7c',
+                minScore: 0.9
+            }).search('anything', 5)
+            // Q4a: the hits the server returned are never discarded.
+            expect(outcome.hits).toHaveLength(1)
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('not applied'))
+        } finally {
+            warn.mockRestore()
+        }
+    })
+
+    it('still applies Minimum Score when the reranker ran', async () => {
+        server = await startMockGoodMem({ retrieveBody: OK })
+        const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+        try {
+            const outcome = await connect({
+                rerankerId: 'e2b7a63e-8f2a-4e3b-9c7a-2d1e0f9a8b7c',
+                minScore: 0.9
+            }).search('anything', 5)
+            // OK fixture: no failure statuses, so the hit keeps its reranker
+            // label and the raw -0.58 score fails a 0.9 threshold.
+            expect(outcome.reranked).toBe(true)
+            expect(outcome.hits).toHaveLength(0)
+        } finally {
+            warn.mockRestore()
+        }
+    })
+
+    it('recognises the two shapes the server reports a failed reranker with', () => {
+        expect(rerankerFailed([{ code: 'RERANKING_FAILED', message: '' }])).toBe(true)
+        expect(rerankerFailed([{ code: 'NOT_FOUND', message: 'Reranker validation failed' }])).toBe(true)
+        expect(rerankerFailed([{ code: 'NOT_FOUND', message: 'x', details: { reranker_id: 'r' } }])).toBe(true)
+        expect(rerankerFailed([{ code: 'NOT_FOUND', message: 'Space missing' }])).toBe(false)
+        expect(rerankerFailed([{ code: 'EMBEDDER_FAILED', message: '' }])).toBe(false)
     })
 })
 

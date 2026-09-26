@@ -84,6 +84,11 @@ export interface RetrievalOutcome {
      * Independent of whether hits came back.
      */
     partial: boolean
+    /**
+     * True when the hits carry reranker scores: a reranker was requested and
+     * the server did not report that it failed.
+     */
+    reranked: boolean
     resultSetId: string
     abstractReply?: string
 }
@@ -122,6 +127,22 @@ export function orientScore(raw: number | null | undefined, reranked: boolean): 
     return reranked ? raw : -raw
 }
 
+/**
+ * Whether the server reported that the requested reranker was not applied.
+ *
+ * On `RERANKING_FAILED`, or a `NOT_FOUND` naming the reranker, GoodMem still
+ * returns the vector-scored hits it had before reranking. Those are negative
+ * distances: they must be oriented as vector scores, and a threshold tuned
+ * for the reranker's scale must not be applied to them.
+ */
+export function rerankerFailed(statuses: RetrievalStatus[]): boolean {
+    return statuses.some(
+        (s) =>
+            s.code === 'RERANKING_FAILED' ||
+            (s.code === 'NOT_FOUND' && (s.details?.reranker_id !== undefined || /reranker/i.test(s.message)))
+    )
+}
+
 /** A one-line summary of why a retrieval was degraded. */
 export function warningText(statuses: RetrievalStatus[]): string {
     if (statuses.length === 0) return ''
@@ -143,12 +164,14 @@ function asRecord(value: unknown): Record<string, unknown> {
  * one document.
  *
  * A stream that ends badly is reported as `MALFORMED_STREAM` with whatever
- * arrived kept, rather than thrown away or presented as complete. A stream
+ * arrived kept, rather than thrown away or presented as complete. When a
+ * requested reranker fails, the server's vector fallback hits are labelled
+ * and oriented as vector scores rather than passed off as reranked. A stream
  * that produced no events at all is a failed request, and is re-thrown: a
  * dead connection must not read as "a search that found nothing".
  */
-export async function outcomeFromEvents(events: AsyncIterable<any>, reranked = false): Promise<RetrievalOutcome> {
-    const outcome: RetrievalOutcome = { hits: [], statuses: [], partial: false, resultSetId: '' }
+export async function outcomeFromEvents(events: AsyncIterable<any>, rerankRequested = false): Promise<RetrievalOutcome> {
+    const outcome: RetrievalOutcome = { hits: [], statuses: [], partial: false, reranked: false, resultSetId: '' }
     const memories = new Map<string, Record<string, unknown>>()
     const pending: Array<{ hit: RetrievalHit; memoryId: string }> = []
     const seen = new Set<string>()
@@ -196,8 +219,9 @@ export async function outcomeFromEvents(events: AsyncIterable<any>, reranked = f
                     memoryId,
                     spaceId: '',
                     rawScore: rawScore === null ? null : Number(rawScore),
-                    score: orientScore(rawScore === null ? null : Number(rawScore), reranked),
-                    scoreKind: reranked ? 'reranker' : 'vector',
+                    // score and scoreKind are assigned once the stream is done.
+                    score: null,
+                    scoreKind: 'vector',
                     contentType: '',
                     metadata: {}
                 },
@@ -213,7 +237,12 @@ export async function outcomeFromEvents(events: AsyncIterable<any>, reranked = f
         outcome.partial = true
     }
 
+    // A status can arrive after the hits it concerns, so what kind of score
+    // the hits carry is decided only once the stream is done.
+    outcome.reranked = rerankRequested && !rerankerFailed(outcome.statuses)
     for (const { hit, memoryId } of pending) {
+        hit.score = orientScore(hit.rawScore, outcome.reranked)
+        hit.scoreKind = outcome.reranked ? 'reranker' : 'vector'
         const mem = memories.get(memoryId)
         if (mem) {
             hit.spaceId = String(mem.spaceId ?? '')

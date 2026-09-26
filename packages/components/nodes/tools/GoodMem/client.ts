@@ -185,7 +185,18 @@ export class GoodMemConnection {
             throw describeError(error, 'GoodMem retrieval')
         }
 
-        if (this.minScore !== undefined) {
+        const rerankFellBack = Boolean(this.rerankerId) && !outcome.reranked
+        if (this.minScore !== undefined && rerankFellBack) {
+            // Q4a: the hits are the server's vector fallback. A threshold tuned
+            // for the configured reranker's scale would discard every one of
+            // them, so it is not applied; partial and the statuses say why.
+            // eslint-disable-next-line no-console
+            console.warn(
+                `[GoodMem] Minimum Score ${this.minScore} not applied: the configured reranker did not run, so the ` +
+                    `${outcome.hits.length} result(s) carry vector fallback scores, not the scale the threshold was set for.`
+            )
+        }
+        if (this.minScore !== undefined && !rerankFellBack) {
             const kept = outcome.hits.filter((h) => h.score !== null && h.score >= (this.minScore as number))
             if (outcome.hits.length > 0 && kept.length === 0) {
                 const scores = outcome.hits.map((h) => h.score).filter((s): s is number => s !== null)
