@@ -108,6 +108,7 @@
         "@opentelemetry/sdk-node": "^0.54.0",
         "@opentelemetry/sdk-trace-base": "1.27.0",
         "@opentelemetry/semantic-conventions": "1.27.0",
+        "@pairsystems/goodmem": "^0.1.7",
         "@pinecone-database/pinecone": "4.0.0",
         "@qdrant/js-client-rest": "^1.17.0",
         "@stripe/agent-toolkit": "^0.1.20",

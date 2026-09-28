@@ -543,6 +543,9 @@ importers:
       '@opentelemetry/semantic-conventions':
         specifier: 1.27.0
         version: 1.27.0
+      '@pairsystems/goodmem':
+        specifier: ^0.1.7
+        version: 0.1.7
       '@pinecone-database/pinecone':
         specifier: 4.0.0
         version: 4.0.0
@@ -7161,6 +7164,10 @@ packages:
     engines: {node: '>=14'}
     peerDependencies:
       '@opentelemetry/api': ^1.1.0
+
+  '@pairsystems/goodmem@0.1.7':
+    resolution: {integrity: sha512-DHQNTFeQlpmUUh6qHogyFOBvaK5baY1g2lq94hBhgEcOG80WvpUv/vCzoE9foCtI9iKL2HMR6yqveVWQ/iLNqw==}
+    engines: {node: '>=20'}
 
   '@paralleldrive/cuid2@2.2.2':
     resolution: {integrity: sha512-ZOBkgDwEdoYVlSeRbYYXs0S9MejQofiVYoTbKzy/6GQa39/q5tQU2IX46+shYnUkpEl3wc+J6wRlar7r2EK2xA==}
@@ -29495,6 +29502,8 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/core': 1.27.0(@opentelemetry/api@1.9.0)
+
+  '@pairsystems/goodmem@0.1.7': {}
 
   '@paralleldrive/cuid2@2.2.2':
     dependencies:

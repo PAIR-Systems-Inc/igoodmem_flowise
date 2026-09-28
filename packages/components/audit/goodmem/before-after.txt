@@ -1,0 +1,176 @@
+FLOWISE GoodMem node -- measured before and after
+Generated 2026-09-25T02:13:53Z
+Baseline: PAIR-Systems-Inc/goodmem_Flowise @ 0118886e (frozen in packages/components/audit/goodmem/baseline/)
+Fixed:    the rewrite on branch fix/goodmem-p1-p38-sweep
+Transport: local mock server replaying NDJSON captured from live GoodMem server-v1.0.320
+
+################ BEFORE ################
+BASELINE REPRODUCTION — Flowise GoodMem node @ 0118886e
+server: mock, NDJSON captured from live server-v1.0.320
+
+### P28 over-broad tool surface (default config)
+  tools exposed by default: 11
+    - goodmem_list_embedders
+    - goodmem_list_spaces
+    - goodmem_get_space
+    - goodmem_create_space
+    - goodmem_update_space
+    - goodmem_delete_space
+    - goodmem_create_memory
+    - goodmem_list_memories
+    - goodmem_get_memory
+    - goodmem_retrieve_memories
+    - goodmem_delete_memory
+  destructive present: goodmem_update_space, goodmem_delete_space, goodmem_delete_memory
+
+### P28b retrieve argument surface
+  goodmem_retrieve_memories takes 10 model-supplied args:
+    query, space_ids, max_results, include_memory_definition, wait_for_indexing, reranker_id, llm_id, relevance_threshold, llm_temperature, chronological_resort
+
+### P10 model-controlled file path (schema)
+  goodmem_create_memory args: space_id, text_content, file_path, metadata
+  file_path description: Local file path to upload as memory (PDF, DOCX, image, etc.). Content type is auto-detected from the extension.
+
+### P2 publicRead is a model-facing argument
+  goodmem_update_space args: space_id, name, public_read, replace_labels, merge_labels
+
+### P34 raw filter expression is model-facing
+  filter_expression: Metadata filter expression using the GoodMem filter syntax.
+
+### P29 score semantics in the schema shown to the model
+  relevance_threshold: Minimum relevance score (0-1) below which results are dropped.
+
+### P4 retrieval statuses dropped (Q4a: problem + hits)
+  server sent: NOT_FOUND, FEATURE_DISABLED, RERANKING_FAILED (3 status events)
+  tool returned keys: success, resultSetId, results, memories, totalResults, query
+  success=true  totalResults=1
+  statuses surfaced: NONE — the reranker failure is invisible to the agent
+  partial flag: absent
+
+### P3 unknown status code (forward compatibility)
+  server sent: TEST_ONLY_FUTURE_RETRIEVAL_STATUS_9E4AD2
+  tool returned: success=true totalResults=2 statuses=NONE — dropped silently
+
+### P5 + Q4b failed retrieval polled as if empty
+  server said RERANKING_FAILED and returned no hits (a FAILURE, not an empty index)
+  elapsed: 60.0s   HTTP retrieve calls: 13
+  success=true  message="No results found after waiting 60 seconds for indexing. Memories may still be processing."
+  statuses: NONE
+
+### P32 unchecked embedder reuse
+  existing space "demo-space" is built on: emb-REAL
+  caller asked for:                        emb-ASKED-FOR
+  tool reported embedderId:                emb-ASKED-FOR   <-- the one asked for
+  reused=true  success=true
+
+### P2 publicRead rejected by the server
+  sent body contained publicRead -> GoodMem API PUT /v1/spaces/space-EXISTING failed: 400 Bad Request - {"code":3,"message":"publicRead is not a recognized 
+
+### P16 binary content force-decoded as text
+  server sent 18 bytes of application/pdf
+  tool returned a JS string of 18 chars -> 30 bytes when re-encoded
+  byte-identical: false
+  U+FFFD replacement chars: 6
+
+### P29 / P30 score + chunk-to-memory join
+  result[0]: {"chunkId":"01a0d44b-7bb4-75a3-b7a1-c7b8cda5859d","chunkText":"The fixture canary is ORYX-2290. CAMEL toolkit audit.\n","memoryId":"01a0d44b-748d-72eb-b54e-c3ea2d956927","relevanceScore":-0.5845972299575806,"memoryIndex":0}
+  relevanceScore is a NEGATIVE distance, handed to the model as-is
+  the schema tells the model the threshold range is "0-1" -> threshold 0.5 drops every vector hit
+  memories[] returned separately; chunks point at them by memoryIndex (arrival position), not memoryId
+
+### P6 first-page-only listing
+  list_memories returned 1 memories + nextToken="PAGE2"
+  the model must notice the token and call again; listSpaces/listEmbedders have no pagination at all
+
+### P6b listSpaces
+  returns a bare array of 1; no token handling in the client at all
+
+### P10 model-supplied path read off the host disk
+  model called goodmem_create_memory(file_path="/etc/hostname")
+  result: success=true memoryId=mem-NEW
+  bytes actually uploaded: "YmFzaGFyLVg4NzAtQU9SVVMtRUxJVEUtV0lGSTcK"
+  /etc/hostname on this host: "bashar-X870-AORUS-ELITE-WIFI7\n"
+
+### P34 filter expression interpolated verbatim
+  model supplied: val('$.owner') = 'x' OR '1'='1
+  query string sent: /v1/spaces/space-EXISTING/memories?filter=val('$.owner')+=+'x'+OR+'1'='1
+
+DONE
+
+################ AFTER #################
+FIXED BEHAVIOUR -- Flowise GoodMem node after the rewrite
+server: mock, NDJSON captured from live server-v1.0.320
+
+### P28 over-broad tool surface (default config)
+  tools exposed by default: 7
+    - goodmem_search
+    - goodmem_remember
+    - goodmem_list_memories
+    - goodmem_get_memory
+    - goodmem_list_spaces
+    - goodmem_get_space
+    - goodmem_list_embedders
+  destructive present: NONE
+
+### P28b search argument surface
+  goodmem_search takes: query, top_k
+
+### P10 model-controlled file path
+  goodmem_upload_file present without an upload directory: false
+  file_path argument anywhere in the surface: false
+
+### P2 publicRead
+  public_read argument anywhere in the surface: false
+
+### P34 raw filter expression
+  filter_expression argument anywhere in the surface: false
+  developer-set filter is escaped: CAST(val('$.owner') AS TEXT) = 'x\' OR \'1\'=\'1'
+
+### P29 score semantics in the schema shown to the model
+  relevance_threshold argument: false (it is node configuration, described as "not a 0-1 range")
+[GoodMem] GoodMem reported a problem during retrieval -- NOT_FOUND: Reranker validation failed: Exception: Reranker not found: 00000000-0000-7000-8000-000000000000 (ID: 00000000-0000-7000-8000-000000000000). Verify the reranker exists and is accessible.; RERANKING_FAILED: Failed to create reranker client: Exception: Reranker not found: 00000000-0000-7000-8000-000000000000
+
+### P4 retrieval statuses (Q4a: problem + hits)
+  server sent: NOT_FOUND, FEATURE_DISABLED, RERANKING_FAILED (3 status events)
+  tool returned keys: query, totalResults, results, partial, statuses, warning
+  totalResults=1  partial=true
+  statuses surfaced: NOT_FOUND, RERANKING_FAILED   (FEATURE_DISABLED filtered per Q1)
+  warning: GoodMem reported a problem during retrieval -- NOT_FOUND: Reranker validation failed: Exce...
+[GoodMem] GoodMem reported a problem during retrieval -- UNKNOWN: Future server notice
+
+### P3 unknown status code (forward compatibility)
+  tool returned: totalResults=2 partial=true statuses=UNKNOWN
+  message kept: "Future server notice"
+[GoodMem] GoodMem reported a problem during retrieval -- NOT_FOUND: Reranker validation failed: Exception: Reranker not found: 00000000-0000-7000-8000-000000000000 (ID: 00000000-0000-7000-8000-000000000000). Verify the reranker exists and is accessible.; RERANKING_FAILED: Failed to create reranker client: Exception: Reranker not found: 00000000-0000-7000-8000-000000000000
+
+### P5 + Q4b failed retrieval with no hits
+  elapsed: 0.0s   HTTP retrieve calls: 1
+  totalResults=0 partial=true statuses=NOT_FOUND, RERANKING_FAILED
+  warning: GoodMem reported a problem during retrieval -- NOT_FOUND: Reranker validation failed: Exception: Reranker not found: 000
+
+### P32 unchecked embedder reuse
+  existing space "demo-space" is built on: emb-REAL
+  caller asked for: emb-ASKED-FOR
+  result: REFUSED -- Space "demo-space" already exists but is built on embedder(s) emb-REAL, not emb-ASKED-FOR. A space's embedder cannot be changed; use a different name or the matching embedder.
+
+### P2 publicRead on the wire
+  PUT body: {"name":"renamed"}   (no publicRead -> no 400)
+
+### P16 binary content
+  server sent 18 bytes of application/pdf
+  encoding: base64  bytes reported: 18
+  byte-identical after decode: true  U+FFFD: 0
+
+### P29 / P30 score + chunk-to-memory join
+  score=0.5845972299575806 rawScore=-0.5845972299575806 scoreKind=vector
+  memoryId=01a0d44b-748d-72eb-b54e-c3ea2d956927  spaceId=01a0d44b-746f-775b-b91e-bc73d4058e27  (joined by UUID, not arrival position)
+
+### P6 listing
+  list_memories returned 1 memories, truncated=false, nextToken exposed: false
+
+### P10 model-supplied path
+  goodmem_upload_file(file_name="/etc/hostname") -> "/etc/hostname" is outside the upload directory "/tmp/gm-upload-NwR3kl".
+  goodmem_upload_file(file_name="allowed.txt")  -> {"memoryId":"mem-NEW","spaceId":"space-EXISTING","fileName":"allowed.txt","processingStatus":"PENDING"}
+  /etc/hostname reached the server: false
+
+DONE
