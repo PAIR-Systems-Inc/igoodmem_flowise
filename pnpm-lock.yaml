@@ -38,6 +38,34 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      '@google-cloud/logging-winston':
+        specifier: ^6.0.0
+        version: 6.0.0(encoding@0.1.13)(winston@3.12.0)
+      multer:
+        specifier: ^2.0.2
+        version: 2.0.2
+      multer-azure-blob-storage:
+        specifier: ^1.2.0
+        version: 1.2.0
+      multer-cloud-storage:
+        specifier: ^4.0.0
+        version: 4.0.0(encoding@0.1.13)
+      multer-s3:
+        specifier: ^3.0.1
+        version: 3.0.1(@aws-sdk/client-s3@3.844.0)
+      s3-streamlogger:
+        specifier: ^1.11.0
+        version: 1.11.0
+      turndown:
+        specifier: ^7.2.0
+        version: 7.2.0
+      winston-azure-blob:
+        specifier: ^1.5.0
+        version: 1.5.0(async@3.2.5)(winston@3.12.0)
+      winston-daily-rotate-file:
+        specifier: ^5.0.0
+        version: 5.0.0(winston@3.12.0)
     devDependencies:
       '@babel/preset-env':
         specifier: ^7.19.4
@@ -353,6 +381,9 @@ importers:
       '@google-ai/generativelanguage':
         specifier: ^2.5.0
         version: 2.6.0(encoding@0.1.13)
+      '@google-cloud/logging-winston':
+        specifier: ^6.0.0
+        version: 6.0.0(encoding@0.1.13)(winston@3.12.0)
       '@google-cloud/storage':
         specifier: ^7.15.2
         version: 7.16.0(encoding@0.1.13)
@@ -665,6 +696,18 @@ importers:
       mongodb:
         specifier: 6.3.0
         version: 6.3.0(@aws-sdk/credential-providers@3.1002.0)(socks@2.8.1)
+      multer:
+        specifier: ^2.0.2
+        version: 2.0.2
+      multer-azure-blob-storage:
+        specifier: ^1.2.0
+        version: 1.2.0
+      multer-cloud-storage:
+        specifier: ^4.0.0
+        version: 4.0.0(encoding@0.1.13)
+      multer-s3:
+        specifier: ^3.0.1
+        version: 3.0.1(@aws-sdk/client-s3@3.844.0)
       mysql2:
         specifier: ^3.11.3
         version: 3.11.4
@@ -722,6 +765,9 @@ importers:
       replicate:
         specifier: ^0.31.1
         version: 0.31.1
+      s3-streamlogger:
+        specifier: ^1.11.0
+        version: 1.11.0
       sanitize-filename:
         specifier: ^1.6.3
         version: 1.6.3
@@ -731,6 +777,9 @@ importers:
       supergateway:
         specifier: 3.0.1
         version: 3.0.1(bufferutil@4.0.8)(utf-8-validate@6.0.4)
+      turndown:
+        specifier: ^7.2.0
+        version: 7.2.0
       typeorm:
         specifier: ^0.3.6
         version: 0.3.20(ioredis@5.3.2)(mongodb@6.3.0(@aws-sdk/credential-providers@3.1002.0)(socks@2.8.1))(mysql2@3.11.4)(pg@8.11.3)(redis@4.6.13)(sqlite3@5.1.7)(ts-node@10.9.2(@swc/core@1.4.6)(@types/node@22.16.3)(typescript@5.5.2))
@@ -746,6 +795,12 @@ importers:
       winston:
         specifier: ^3.9.0
         version: 3.12.0
+      winston-azure-blob:
+        specifier: ^1.5.0
+        version: 1.5.0(async@3.2.5)(winston@3.12.0)
+      winston-daily-rotate-file:
+        specifier: ^5.0.0
+        version: 5.0.0(winston@3.12.0)
       ws:
         specifier: 8.18.3
         version: 8.18.3(bufferutil@4.0.8)(utf-8-validate@6.0.4)
@@ -939,7 +994,7 @@ importers:
         version: 6.11.0
       '@google-cloud/logging-winston':
         specifier: ^6.0.0
-        version: 6.0.0(winston@3.12.0)
+        version: 6.0.0(encoding@0.1.13)(winston@3.12.0)
       '@keyv/redis':
         specifier: ^4.2.0
         version: 4.3.3
@@ -1113,7 +1168,7 @@ importers:
         version: 1.2.0
       multer-cloud-storage:
         specifier: ^4.0.0
-        version: 4.0.0
+        version: 4.0.0(encoding@0.1.13)
       multer-s3:
         specifier: ^3.0.1
         version: 3.0.1(@aws-sdk/client-s3@3.844.0)
@@ -26443,7 +26498,7 @@ snapshots:
       - encoding
       - supports-color
 
-  '@google-cloud/common@5.0.2':
+  '@google-cloud/common@5.0.2(encoding@0.1.13)':
     dependencies:
       '@google-cloud/projectify': 4.0.0
       '@google-cloud/promisify': 4.1.0
@@ -26458,9 +26513,9 @@ snapshots:
       - encoding
       - supports-color
 
-  '@google-cloud/logging-winston@6.0.0(winston@3.12.0)':
+  '@google-cloud/logging-winston@6.0.0(encoding@0.1.13)(winston@3.12.0)':
     dependencies:
-      '@google-cloud/logging': 11.2.0
+      '@google-cloud/logging': 11.2.0(encoding@0.1.13)
       google-auth-library: 9.15.1(encoding@0.1.13)
       lodash.mapvalues: 4.6.0
       winston: 3.12.0
@@ -26469,9 +26524,9 @@ snapshots:
       - encoding
       - supports-color
 
-  '@google-cloud/logging@11.2.0':
+  '@google-cloud/logging@11.2.0(encoding@0.1.13)':
     dependencies:
-      '@google-cloud/common': 5.0.2
+      '@google-cloud/common': 5.0.2(encoding@0.1.13)
       '@google-cloud/paginator': 5.0.2
       '@google-cloud/projectify': 4.0.0
       '@google-cloud/promisify': 4.1.0
@@ -41377,7 +41432,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  multer-cloud-storage@4.0.0:
+  multer-cloud-storage@4.0.0(encoding@0.1.13):
     dependencies:
       '@google-cloud/storage': 7.16.0(encoding@0.1.13)
       '@types/express': 5.0.1
